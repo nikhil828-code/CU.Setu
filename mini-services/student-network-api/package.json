@@ -4,7 +4,8 @@
   "private": true,
   "description": "CampusConnect Flask backend (Python DSA service) for the university student networking platform",
   "scripts": {
-    "dev": "python3 app.py",
+    "dev": "bash run.sh",
+    "start": "bash run.sh",
     "test": "python3 -m unittest discover -s tests -v"
   }
 }
