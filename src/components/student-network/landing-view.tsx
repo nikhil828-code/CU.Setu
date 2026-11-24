@@ -33,15 +33,18 @@ function CountUp({ value }: { value: number }) {
 const FEATURES = [
   {
     title: 'Graph-powered networking',
-    description: 'Every connection is a real edge in an adjacency list. Your network is a graph — traversed, measured and queried like one.',
+    description:
+      'Every connection is a real edge in an adjacency list. Your network is a graph — traversed, measured and queried like one.',
   },
   {
     title: 'Instant prefix search',
-    description: 'Search students by name or username in milliseconds — powered by a Trie that walks character by character.',
+    description:
+      'Find any Chanakya University student by name or username in milliseconds — powered by a Trie that walks character by character.',
   },
   {
     title: 'Ranked recommendations',
-    description: 'People you may know, scored with Jaccard similarity, mutual connections and shared skills — selected with a bounded heap.',
+    description:
+      'People you may know, scored with Jaccard similarity, mutual connections and shared skills — selected with a bounded heap.',
   },
 ]
 
@@ -58,10 +61,17 @@ export function LandingView() {
     <div className="flex min-h-screen flex-col bg-[#0A1128] text-slate-200">
       <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0A1128]/90 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <BrandMark className="size-8" />
-            <span className="text-lg font-semibold text-white">CampusConnect</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => goto('landing')}
+            className="flex items-center gap-2.5"
+            aria-label="CU.Setu home"
+          >
+            <BrandMark className="h-9 w-auto" />
+            <span className="text-lg font-semibold tracking-tight text-white">
+              CU.<span className="text-amber-400">Setu</span>
+            </span>
+          </button>
           <nav className="flex items-center gap-2" aria-label="Authentication">
             <Button
               variant="ghost"
@@ -71,7 +81,7 @@ export function LandingView() {
               Log in
             </Button>
             <Button
-              className="bg-[#101B3D] text-white hover:bg-[#182650]"
+              className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
               onClick={() => goto('register')}
             >
               Sign up
@@ -81,76 +91,87 @@ export function LandingView() {
       </header>
 
       <main className="flex-1">
-        {/* Hero */}
-        <section className="mx-auto grid w-full max-w-6xl items-center gap-10 px-4 py-14 sm:px-6 lg:grid-cols-2 lg:gap-16 lg:py-24">
-          <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-[#93C5FD]">
-              <span className="size-1.5 rounded-full bg-gradient-to-r from-[#2563EB] to-[#7C3AED]" aria-hidden="true" />
-              The university network for builders
-            </p>
-            <h1 className="mt-5 text-4xl font-bold tracking-tight text-white sm:text-5xl">
-              Where university talent{' '}
-              <span className="bg-gradient-to-r from-[#60A5FA] to-[#A78BFA] bg-clip-text text-transparent">
-                networks.
-              </span>
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-400">
-              Share technical projects, celebrate achievements and trade ideas with
-              the students who get it. Build a network that is a real graph —
-              every connection an edge, every search a Trie walk, every
-              recommendation a similarity score.
-            </p>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Button
-                size="lg"
-                className="bg-gradient-to-r from-[#2563EB] to-[#7C3AED] text-white hover:opacity-90"
-                onClick={() => goto('register')}
-              >
-                Join CampusConnect
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"
-                onClick={() => goto('login')}
-              >
-                Log in
-              </Button>
+        {/* Hero — the Chanakya University campus as the backdrop. The sky
+            stays clearly visible (light overlay) while a darker scrim
+            settles around the name for readability. */}
+        <section className="relative isolate flex min-h-[540px] items-center overflow-hidden sm:min-h-[600px]">
+          <Image
+            src="/cu-campus.jpg"
+            alt="Chanakya University campus building with the Indian flag"
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover"
+          />
+          {/* Bottom-dark -> top-transparent: the blue sky stays visible. */}
+          <div
+            className="absolute inset-0 bg-gradient-to-t from-[#050B1F]/95 via-[#0A1128]/40 to-[#0A1128]/10"
+            aria-hidden="true"
+          />
+          {/* Extra darkness hugging the name block on the left. */}
+          <div
+            className="absolute inset-0 bg-[radial-gradient(58%_70%_at_27%_62%,rgba(4,9,26,0.92)_0%,rgba(4,9,26,0.55)_45%,transparent_75%)]"
+            aria-hidden="true"
+          />
+          <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
+            <div className="max-w-2xl">
+              <BrandMark className="h-20 w-auto sm:h-24" />
+              <h1 className="mt-4 text-5xl font-bold tracking-tight text-white sm:text-6xl">
+                CU.<span className="text-amber-400">Setu</span>
+              </h1>
+              <p className="mt-3 text-lg font-medium text-slate-200 sm:text-xl">
+                A bridge connecting the students of Chanakya University.
+              </p>
+              <p className="mt-1.5 text-sm font-medium tracking-wide text-amber-300/90">
+                Connect · Share · Grow
+              </p>
+              <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-300">
+                Share technical projects, celebrate achievements and trade ideas
+                with the students who get it. Build a network that is a real
+                graph — every connection an edge, every search a Trie walk,
+                every recommendation a similarity score.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Button
+                  size="lg"
+                  className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-lg shadow-orange-950/40 hover:from-amber-600 hover:to-orange-700"
+                  onClick={() => goto('register')}
+                >
+                  Join CU.Setu
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="border-white/30 bg-white/10 text-white backdrop-blur hover:bg-white/20 hover:text-white"
+                  onClick={() => goto('login')}
+                >
+                  Log in
+                </Button>
+              </div>
+              <dl className="mt-10 grid max-w-lg grid-cols-3 gap-3 rounded-2xl border border-white/10 bg-[#0A1128]/60 p-4 backdrop-blur-sm sm:gap-4">
+                <div>
+                  <dt className="sr-only">Students</dt>
+                  <dd className="text-2xl font-bold text-white sm:text-3xl">
+                    {stats ? <CountUp value={stats.students} /> : '—'}
+                  </dd>
+                  <dd className="mt-1 text-xs text-slate-300">Students on campus</dd>
+                </div>
+                <div className="border-x border-white/10 pl-3 sm:pl-4">
+                  <dt className="sr-only">Connections</dt>
+                  <dd className="text-2xl font-bold text-white sm:text-3xl">
+                    {stats ? <CountUp value={stats.connections} /> : '—'}
+                  </dd>
+                  <dd className="mt-1 text-xs text-slate-300">Connections formed</dd>
+                </div>
+                <div className="pl-3 sm:pl-4">
+                  <dt className="sr-only">Posts</dt>
+                  <dd className="text-2xl font-bold text-white sm:text-3xl">
+                    {stats ? <CountUp value={stats.posts} /> : '—'}
+                  </dd>
+                  <dd className="mt-1 text-xs text-slate-300">Projects shared</dd>
+                </div>
+              </dl>
             </div>
-            <dl className="mt-10 grid grid-cols-3 gap-3 sm:gap-4">
-              <div>
-                <dt className="sr-only">Students</dt>
-                <dd className="text-2xl font-bold text-white sm:text-3xl">
-                  {stats ? <CountUp value={stats.students} /> : '—'}
-                </dd>
-                <dd className="mt-1 text-xs text-slate-500">Students on campus</dd>
-              </div>
-              <div className="border-x border-white/10 pl-3 sm:pl-4">
-                <dt className="sr-only">Connections</dt>
-                <dd className="text-2xl font-bold text-white sm:text-3xl">
-                  {stats ? <CountUp value={stats.connections} /> : '—'}
-                </dd>
-                <dd className="mt-1 text-xs text-slate-500">Connections formed</dd>
-              </div>
-              <div className="pl-3 sm:pl-4">
-                <dt className="sr-only">Posts</dt>
-                <dd className="text-2xl font-bold text-white sm:text-3xl">
-                  {stats ? <CountUp value={stats.posts} /> : '—'}
-                </dd>
-                <dd className="mt-1 text-xs text-slate-500">Projects shared</dd>
-              </div>
-            </dl>
-          </div>
-          <div className="relative overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/40">
-            <Image
-              src="/hero-network.jpg"
-              alt="Abstract network graph illustration on a dark navy background"
-              width={1344}
-              height={768}
-              priority
-              className="h-auto w-full object-cover"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0A1128]/70 via-transparent to-[#0A1128]/20" />
           </div>
         </section>
 
@@ -167,7 +188,7 @@ export function LandingView() {
               {FEATURES.map((feature) => (
                 <div
                   key={feature.title}
-                  className="rounded-xl border border-white/10 bg-white/5 p-6 transition-colors hover:border-white/20 hover:bg-white/[0.07]"
+                  className="rounded-xl border border-white/10 bg-white/5 p-6 transition-colors hover:border-amber-500/40 hover:bg-white/[0.07]"
                 >
                   <h3 className="text-base font-semibold text-white">{feature.title}</h3>
                   <p className="mt-2 text-sm leading-relaxed text-slate-400">
@@ -190,7 +211,7 @@ export function LandingView() {
               {DSA_CHIPS.map((chip) => (
                 <li
                   key={chip}
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-[#93C5FD]"
+                  className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-300"
                 >
                   {chip}
                 </li>
@@ -211,10 +232,17 @@ export function LandingView() {
 
       <footer className="mt-auto border-t border-white/10 bg-[#0A1128]">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-8 sm:px-6 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-2.5">
-            <BrandMark className="size-6" />
-            <span className="text-sm font-semibold text-white">CampusConnect</span>
-            <span className="text-sm text-slate-500">· A Data Structures &amp; Algorithms mini project</span>
+          <div className="flex items-center gap-3">
+            <BrandMark className="h-8 w-auto" />
+            <div>
+              <p className="text-sm font-semibold text-white">
+                CU.<span className="text-amber-400">Setu</span>
+              </p>
+              <p className="text-xs text-slate-500">
+                A bridge connecting the students of Chanakya University · A Data
+                Structures &amp; Algorithms mini project
+              </p>
+            </div>
           </div>
           <nav className="flex items-center gap-4 text-sm text-slate-400" aria-label="Footer">
             <button type="button" className="hover:text-white" onClick={() => goto('login')}>

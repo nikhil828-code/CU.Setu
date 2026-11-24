@@ -35,6 +35,10 @@ class User:
     bio: str = ""
     skills: List[str] = field(default_factory=list)
     interests: List[str] = field(default_factory=list)
+    # Public URLs of the uploaded profile photo / profile background.
+    # Empty string -> the UI falls back to initials / gradient banner.
+    avatar_url: str = ""
+    cover_url: str = ""
     created_at: str = ""
 
 

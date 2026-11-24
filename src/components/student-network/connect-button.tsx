@@ -126,7 +126,7 @@ export function ConnectButton({
         size={size}
         onClick={() => sendMutation.mutate()}
         disabled={sendMutation.isPending}
-        className={cn('bg-[#101B3D] text-white hover:bg-[#182650]', className)}
+        className={cn('bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700', className)}
       >
         <UserPlus aria-hidden="true" />
         {sendMutation.isPending ? 'Sending…' : 'Connect'}
@@ -150,7 +150,7 @@ export function ConnectButton({
           size={size}
           onClick={() => pendingId && acceptMutation.mutate(pendingId)}
           disabled={pendingId === null || acceptMutation.isPending}
-          className="bg-[#101B3D] text-white hover:bg-[#182650]"
+          className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
         >
           <Check aria-hidden="true" />
           {acceptMutation.isPending ? 'Accepting…' : 'Accept'}

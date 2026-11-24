@@ -93,7 +93,7 @@ export function FeedView() {
               description="Follow more students to fill it up — posts from you and your connections appear here."
               action={
                 <Button
-                  className="bg-[#101B3D] text-white hover:bg-[#182650]"
+                  className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
                   onClick={() => goto('discover')}
                 >
                   <Compass aria-hidden="true" />
@@ -125,7 +125,7 @@ export function FeedView() {
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                  <Compass className="size-4 text-[#2563EB]" aria-hidden="true" />
+                  <Compass className="size-4 text-orange-600" aria-hidden="true" />
                   People you may know
                 </CardTitle>
               </CardHeader>
@@ -138,6 +138,7 @@ export function FeedView() {
                     <UserAvatar
                       username={person.username}
                       fullName={person.full_name}
+                      avatarUrl={person.avatar_url}
                       onClick={() => openProfile(person.username)}
                     />
                     <div className="min-w-0 flex-1">
@@ -176,7 +177,7 @@ export function FeedView() {
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <Network className="size-4 text-[#2563EB]" aria-hidden="true" />
+                <Network className="size-4 text-orange-600" aria-hidden="true" />
                 Live platform stats
               </CardTitle>
             </CardHeader>
@@ -208,8 +209,8 @@ export function FeedView() {
 
           <Card className="shadow-sm">
             <CardContent className="flex items-center gap-3 p-4">
-              <div className="flex size-10 items-center justify-center rounded-full bg-gradient-to-br from-[#2563EB]/10 to-[#7C3AED]/10">
-                <Users className="size-5 text-[#2563EB]" aria-hidden="true" />
+              <div className="flex size-10 items-center justify-center rounded-full bg-gradient-to-br from-orange-500/10 to-amber-500/10">
+                <Users className="size-5 text-orange-600" aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold">
@@ -222,7 +223,7 @@ export function FeedView() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-[#2563EB] hover:text-[#1D4ED8]"
+                className="text-orange-600 hover:text-orange-700"
                 onClick={() => goto('connections')}
               >
                 View

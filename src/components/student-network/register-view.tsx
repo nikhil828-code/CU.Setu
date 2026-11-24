@@ -116,7 +116,7 @@ export function RegisterView() {
       setMe(user)
       goto('feed')
       toast({
-        title: `Welcome to CampusConnect, ${user.full_name.split(' ')[0]}`,
+        title: `Welcome to CU.Setu, ${user.full_name.split(' ')[0]}`,
         description: 'Your first edge in the graph has been added.',
       })
     } catch (err) {
@@ -137,14 +137,14 @@ export function RegisterView() {
             <button
               type="button"
               onClick={() => goto('landing')}
-              aria-label="CampusConnect home"
+              aria-label="CU.Setu home"
               className="flex items-center gap-2.5"
             >
-              <BrandMark className="size-10" />
+              <BrandMark className="h-10 w-auto" />
             </button>
             <h1 className="text-2xl font-semibold text-white">Create your account</h1>
             <p className="text-sm text-slate-400">
-              Join the university network for builders.
+              Join the bridge connecting the students of Chanakya University.
             </p>
           </div>
 
@@ -305,7 +305,7 @@ export function RegisterView() {
                 <Button
                   type="submit"
                   disabled={submitting}
-                  className="w-full bg-[#101B3D] text-white hover:bg-[#182650]"
+                  className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
                 >
                   {submitting ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
                   {submitting ? 'Creating account…' : 'Create account'}
@@ -318,7 +318,7 @@ export function RegisterView() {
             Already have an account?{' '}
             <button
               type="button"
-              className="font-medium text-[#93C5FD] hover:underline"
+              className="font-medium text-amber-300 hover:underline"
               onClick={() => goto('login')}
             >
               Log in
@@ -327,21 +327,22 @@ export function RegisterView() {
         </div>
       </main>
 
-      {/* Side panel visual (lg+) */}
+      {/* Side panel visual (lg+) — the Chanakya University campus */}
       <aside className="relative hidden w-[420px] shrink-0 lg:block" aria-hidden="true">
         <Image
-          src="/auth-visual.jpg"
+          src="/cu-campus.jpg"
           alt=""
           fill
           priority
           className="object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0A1128]/80 via-[#0A1128]/20 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0A1128] via-[#0A1128]/55 to-transparent" />
         <div className="absolute bottom-10 left-8 right-8">
-          <p className="text-lg font-medium leading-relaxed text-white">
+          <BrandMark className="h-12 w-auto" />
+          <p className="mt-3 text-lg font-medium leading-relaxed text-white">
             Great networks are built one edge at a time.
           </p>
-          <p className="mt-2 text-sm text-slate-400">— the CampusConnect principle</p>
+          <p className="mt-2 text-sm text-slate-400">— the CU.Setu principle</p>
         </div>
       </aside>
     </div>

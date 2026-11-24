@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { AppShell } from '@/components/student-network/app-shell'
 import { BrandMark } from '@/components/student-network/brand-mark'
 import { ConnectionsView } from '@/components/student-network/connections-view'
+import { CursorGlow } from '@/components/student-network/cursor-glow'
 import { DiscoverView } from '@/components/student-network/discover-view'
 import { FeedView } from '@/components/student-network/feed-view'
 import { LandingView } from '@/components/student-network/landing-view'
@@ -23,11 +24,17 @@ import { useAppStore } from '@/store/app-store'
 function SplashScreen() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#0A1128]">
-      <BrandMark className="size-12" />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
+      >
+        <BrandMark className="h-20 w-auto" />
+      </motion.div>
       <div className="flex items-center gap-2 text-sm text-slate-400">
-        <span className="size-2 animate-pulse rounded-full bg-[#60A5FA]" aria-hidden="true" />
+        <span className="size-2 animate-pulse rounded-full bg-amber-400" aria-hidden="true" />
         Connecting to your network…
-        <span className="sr-only">CampusConnect is loading</span>
+        <span className="sr-only">CU.Setu is loading</span>
       </div>
     </div>
   )
@@ -125,6 +132,7 @@ export function AppRoot() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <CursorGlow />
       <AppRootInner />
     </QueryClientProvider>
   )

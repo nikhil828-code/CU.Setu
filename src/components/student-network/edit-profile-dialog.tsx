@@ -205,7 +205,7 @@ function EditProfileForm({
         <Button
           type="submit"
           disabled={saveMutation.isPending}
-          className="bg-[#101B3D] text-white hover:bg-[#182650]"
+          className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
         >
           {saveMutation.isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
           {saveMutation.isPending ? 'Saving…' : 'Save changes'}

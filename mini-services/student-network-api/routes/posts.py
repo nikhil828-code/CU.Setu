@@ -1,7 +1,8 @@
 """Post / feed routes."""
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
+import media
 from network import network_state
 from routes import api_handler, body, current_username, login_required
 
@@ -20,9 +21,22 @@ def feed():
 @login_required
 @api_handler
 def create_post():
-    data = body()
-    post = network_state.create_post(current_username(), data.get("content", ""))
-    return jsonify({"post": network_state.serialize_post(post, current_username())}), 201
+    """Create a post — either JSON `{content}` or multipart form data with
+    an optional `media` file (photo or video) attached to the text."""
+    username = current_username()
+    media_url, media_type = "", ""
+
+    if request.files:
+        # Multipart upload: text fields arrive in request.form.
+        content = request.form.get("content", "")
+        upload = request.files.get("media")
+        if upload is not None:
+            media_url, media_type = media.save_post_media(upload, username)
+    else:
+        content = body().get("content", "")
+
+    post = network_state.create_post(username, content, media_url, media_type)
+    return jsonify({"post": network_state.serialize_post(post, username)}), 201
 
 
 @posts_bp.delete("/api/posts/<int:post_id>")
@@ -46,9 +60,15 @@ def add_comment(post_id):
     data = body()
     comment = network_state.add_comment(post_id, current_username(),
                                         data.get("content", ""))
-    return jsonify({"comment": {
-        "id": comment.id,
-        "author": network_state.user_summary(comment.author),
-        "content": comment.content,
-        "created_at": comment.created_at,
-    }}), 201
+    return jsonify({"comment":
+                    network_state.serialize_comment(comment,
+                                                    current_username())}), 201
+
+
+@posts_bp.post("/api/comments/<int:comment_id>/like")
+@login_required
+@api_handler
+def toggle_comment_like(comment_id):
+    """Like / unlike a comment (one like per user, O(1) set lookup)."""
+    return jsonify(network_state.toggle_comment_like(comment_id,
+                                                     current_username()))

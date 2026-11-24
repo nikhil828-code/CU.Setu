@@ -33,21 +33,13 @@ from dsa.graph import SocialGraph
 from dsa.heap import MinHeap
 from dsa.recommendations import people_you_may_know
 from dsa.trie import Trie
+from errors import ApiError          # re-exported for the route layer
 from models import (Comment, ConnectionRequest, Notification, Post, User,
                     hash_password, verify_password)
 from models.connection import PENDING
 import seed
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9_]{3,24}$")
-
-
-class ApiError(Exception):
-    """An error the API layer should answer with `status` + message."""
-
-    def __init__(self, message: str, status: int = 400) -> None:
-        super().__init__(message)
-        self.message = message
-        self.status = status
 
 
 def now_iso() -> str:
@@ -92,6 +84,8 @@ class Network:
         self.posts_by_id: Dict[int, Post] = {}
         self.likes: Dict[int, Set[str]] = {}
         self.comments: Dict[int, List[Comment]] = {}
+        self.comment_likes: Dict[int, Set[str]] = {}
+        self.comments_by_id: Dict[int, Comment] = {}
         self.requests: Dict[int, ConnectionRequest] = {}
         self.notifications: Dict[str, List[Notification]] = {}
         self._post_counts: Dict[str, int] = {}
@@ -118,6 +112,7 @@ class Network:
             self.trie = Trie()
             self.posts, self.posts_by_id = [], {}
             self.likes, self.comments = {}, {}
+            self.comment_likes, self.comments_by_id = {}, {}
             self.requests = {}
             self.notifications = {}
             self._post_counts = {}
@@ -144,6 +139,10 @@ class Network:
 
             self.likes = db.fetch_likes()
             self.comments = db.fetch_comments()
+            for comment_list in self.comments.values():
+                for comment in comment_list:
+                    self.comments_by_id[comment.id] = comment
+            self.comment_likes = db.fetch_comment_likes()
 
             for note in db.fetch_all_notifications():
                 self.notifications.setdefault(note.recipient, []).append(note)
@@ -241,6 +240,22 @@ class Network:
             self._reindex_user(user)          # keep the Trie fresh
             return user
 
+    def set_profile_photo(self, username: str, avatar_url: str) -> User:
+        """Store the URL of an uploaded profile photo ("" clears it)."""
+        with self._lock:
+            user = self.require_user(username)
+            user.avatar_url = avatar_url
+            db.update_user_media(username, avatar_url=avatar_url)
+            return user
+
+    def set_cover_photo(self, username: str, cover_url: str) -> User:
+        """Store the URL of an uploaded profile background ("" clears it)."""
+        with self._lock:
+            user = self.require_user(username)
+            user.cover_url = cover_url
+            db.update_user_media(username, cover_url=cover_url)
+            return user
+
     # ====================================================================== #
     # Connection requests (the pending directed edges)
     # ====================================================================== #
@@ -331,16 +346,18 @@ class Network:
     # ====================================================================== #
     # Posts, likes, comments
     # ====================================================================== #
-    def create_post(self, author: str, content: str) -> Post:
+    def create_post(self, author: str, content: str, media_url: str = "",
+                    media_type: str = "") -> Post:
         content = (content or "").strip()
-        if not content:
+        if not content and not media_url:
             raise ApiError("Post content cannot be empty.", 400)
         if len(content) > POST_MAX_CHARS:
             raise ApiError(f"Posts are limited to {POST_MAX_CHARS} characters.", 400)
         with self._lock:
             created = now_iso()
-            post = Post(db.insert_post(author, content, created),
-                        author, content, created)
+            post = Post(db.insert_post(author, content, created,
+                                       media_url, media_type),
+                        author, content, created, media_url, media_type)
             self.posts.append(post)
             self.posts_by_id[post.id] = post
             self._post_counts[author] = self._post_counts.get(author, 0) + 1
@@ -357,7 +374,9 @@ class Network:
             self.posts.remove(post)
             self.posts_by_id.pop(post_id, None)
             self.likes.pop(post_id, None)
-            self.comments.pop(post_id, None)
+            for comment in self.comments.pop(post_id, []):
+                self.comment_likes.pop(comment.id, None)
+                self.comments_by_id.pop(comment.id, None)
             self._post_counts[post.author] = self._post_counts.get(post.author, 1) - 1
             return {"deleted": post_id}
 
@@ -395,11 +414,34 @@ class Network:
             comment = Comment(db.insert_comment(post_id, acting_user, content, created),
                               post_id, acting_user, content, created)
             self.comments.setdefault(post_id, []).append(comment)
+            self.comments_by_id[comment.id] = comment
             if post.author != acting_user:
                 self._notify(post.author, "post_commented", acting_user,
                              f"{self.users[acting_user].full_name} "
                              "commented on your post")
             return comment
+
+    def toggle_comment_like(self, comment_id: int, acting_user: str) -> dict:
+        """Like / unlike a comment — same hash-table set pattern as post
+        likes, so the membership test is O(1)."""
+        with self._lock:
+            comment = self.comments_by_id.get(comment_id)
+            if comment is None:
+                raise ApiError("Comment not found.", 404)
+            likers = self.comment_likes.setdefault(comment_id, set())
+            if acting_user in likers:
+                likers.discard(acting_user)
+                db.delete_comment_like(comment_id, acting_user)
+                liked = False
+            else:
+                likers.add(acting_user)
+                db.insert_comment_like(comment_id, acting_user, now_iso())
+                liked = True
+                if comment.author != acting_user:
+                    self._notify(comment.author, "comment_liked", acting_user,
+                                 f"{self.users[acting_user].full_name} "
+                                 "liked your comment")
+            return {"liked": liked, "likes": len(likers)}
 
     # ====================================================================== #
     # Read models (all computed in memory with the DSA modules)
@@ -590,6 +632,8 @@ class Network:
             "bio": user.bio,
             "skills": list(user.skills),
             "interests": list(user.interests),
+            "avatar_url": user.avatar_url,
+            "cover_url": user.cover_url,
             "connections_count": self.graph.degree(username),
             "posts_count": self._post_counts.get(username, 0),
         }
@@ -601,15 +645,25 @@ class Network:
             "author": self.user_summary(post.author),
             "content": post.content,
             "created_at": post.created_at,
+            "media_url": post.media_url,
+            "media_type": post.media_type,
             "likes": len(likers),
             "liked_by_me": bool(viewer and viewer in likers),
-            "comments": [{
-                "id": comment.id,
-                "author": self.user_summary(comment.author),
-                "content": comment.content,
-                "created_at": comment.created_at,
-            } for comment in self.comments.get(post.id, [])],
+            "comments": [self.serialize_comment(comment, viewer)
+                         for comment in self.comments.get(post.id, [])],
             "is_mine": bool(viewer and post.author == viewer),
+        }
+
+    def serialize_comment(self, comment: Comment, viewer: Optional[str]) -> dict:
+        """One comment with its like state (O(1) hash-table lookup)."""
+        likers = self.comment_likes.get(comment.id, set())
+        return {
+            "id": comment.id,
+            "author": self.user_summary(comment.author),
+            "content": comment.content,
+            "created_at": comment.created_at,
+            "likes": len(likers),
+            "liked_by_me": bool(viewer and viewer in likers),
         }
 
     def _serialize_note(self, note: Notification) -> dict:

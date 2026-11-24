@@ -29,7 +29,7 @@ export function StatChip({
         <Icon
           className={cn(
             'size-4 shrink-0',
-            tone === 'light' ? 'text-[#2563EB]' : 'text-[#93C5FD]',
+            tone === 'light' ? 'text-orange-600' : 'text-amber-300',
           )}
           aria-hidden="true"
         />

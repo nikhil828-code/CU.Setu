@@ -1,0 +1,654 @@
+     1→"""
+     2→In-memory network state — the bridge between SQLite and the DSA modules.
+     3→
+     4→What lives in memory (loaded once at startup)
+     5→--------------------------------------------
+     6→    users         hash table  username -> User          (O(1) lookups)
+     7→    graph         SocialGraph adjacency lists            (accepted + pending edges)
+     8→    trie          Trie                                  (prefix search index)
+     9→    posts         list + hash table id -> Post
+    10→    likes         hash table  post_id -> set(usernames) (O(1) "did I like this?")
+    11→    comments      hash table  post_id -> chronological list
+    12→    requests      hash table  request_id -> ConnectionRequest (the pending queue)
+    13→    notifications hash table  username -> FIFO list
+    14→
+    15→Every mutation updates the in-memory structures FIRST, then mirrors the
+    16→change into SQLite — so the database is pure persistence while ALL
+    17→computation (BFS paths, mutuals, feed ordering, recommendations, search)
+    18→happens on these in-memory data structures.
+    19→
+    20→A re-entrant lock guards all operations because the Flask dev server is
+    21→multi-threaded.
+    22→"""
+    23→
+    24→import re
+    25→import threading
+    26→from datetime import datetime, timedelta, timezone
+    27→from typing import Dict, List, Optional, Set, Tuple
+    28→
+    29→import database as db
+    30→from config import PASSWORD_MIN, POST_MAX_CHARS
+    31→from dsa.bfs import bfs_levels, connection_degrees, shortest_path
+    32→from dsa.graph import SocialGraph
+    33→from dsa.heap import MinHeap
+    34→from dsa.recommendations import people_you_may_know
+    35→from dsa.trie import Trie
+    36→from models import (Comment, ConnectionRequest, Notification, Post, User,
+    37→                    hash_password, verify_password)
+    38→from models.connection import PENDING
+    39→import seed
+    40→
+    41→USERNAME_PATTERN = re.compile(r"^[a-z0-9_]{3,24}$")
+    42→
+    43→
+    44→class ApiError(Exception):
+    45→    """An error the API layer should answer with `status` + message."""
+    46→
+    47→    def __init__(self, message: str, status: int = 400) -> None:
+    48→        super().__init__(message)
+    49→        self.message = message
+    50→        self.status = status
+    51→
+    52→
+    53→def now_iso() -> str:
+    54→    """Current UTC time as an ISO-8601 string."""
+    55→    return datetime.now(timezone.utc).isoformat()
+    56→
+    57→
+    58→def ts_of(iso: str) -> float:
+    59→    """Parse an ISO timestamp into a Unix float (heap priority key)."""
+    60→    try:
+    61→        return datetime.fromisoformat(iso).timestamp()
+    62→    except (ValueError, TypeError):
+    63→        return 0.0
+    64→
+    65→
+    66→def clean_list(value) -> List[str]:
+    67→    """Normalise skills / interests coming from JSON: accepts a list or a
+    68→    comma-separated string; deduplicates and trims."""
+    69→    if isinstance(value, str):
+    70→        parts = value.split(",")
+    71→    elif isinstance(value, (list, tuple)):
+    72→        parts = [str(item) for item in value]
+    73→    else:
+    74→        parts = []
+    75→    cleaned: List[str] = []
+    76→    for part in parts:
+    77→        part = part.strip()
+    78→        if part and len(part) <= 40 and part not in cleaned:
+    79→            cleaned.append(part)
+    80→    return cleaned[:12]
+    81→
+    82→
+    83→class Network:
+    84→    """The single in-memory source of truth for the whole platform."""
+    85→
+    86→    def __init__(self) -> None:
+    87→        self._lock = threading.RLock()
+    88→        self.users: Dict[str, User] = {}
+    89→        self.graph = SocialGraph()
+    90→        self.trie = Trie()
+    91→        self.posts: List[Post] = []
+    92→        self.posts_by_id: Dict[int, Post] = {}
+    93→        self.likes: Dict[int, Set[str]] = {}
+    94→        self.comments: Dict[int, List[Comment]] = {}
+    95→        self.requests: Dict[int, ConnectionRequest] = {}
+    96→        self.notifications: Dict[str, List[Notification]] = {}
+    97→        self._post_counts: Dict[str, int] = {}
+    98→        self._indexed_keywords: Dict[str, List[str]] = {}
+    99→
+   100→    # ====================================================================== #
+   101→    # Lifecycle
+   102→    # ====================================================================== #
+   103→    def initialize(self) -> None:
+   104→        """Create tables, seed sample data on first boot, load memory."""
+   105→        with self._lock:
+   106→            db.init_db()
+   107→            if not db.fetch_all_users():
+   108→                seed.seed_sample_data()
+   109→            self.reload_from_db()
+   110→
+   111→    def reload_from_db(self) -> None:
+   112→        """Rebuild every in-memory structure from SQLite. This is the only
+   113→        place the database is read in bulk — graph operations afterwards
+   114→        never touch SQL."""
+   115→        with self._lock:
+   116→            self.users = {}
+   117→            self.graph = SocialGraph()
+   118→            self.trie = Trie()
+   119→            self.posts, self.posts_by_id = [], {}
+   120→            self.likes, self.comments = {}, {}
+   121→            self.requests = {}
+   122→            self.notifications = {}
+   123→            self._post_counts = {}
+   124→            self._indexed_keywords = {}
+   125→
+   126→            for user in db.fetch_all_users():
+   127→                self.users[user.username] = user
+   128→                self.graph.add_vertex(user.username)
+   129→                self._index_user(user)
+   130→
+   131→            for user_a, user_b in db.fetch_connections():
+   132→                if user_a in self.users and user_b in self.users \
+   133→                        and not self.graph.is_connected(user_a, user_b):
+   134→                    self.graph.add_edge(user_a, user_b)
+   135→
+   136→            for request in db.fetch_pending_requests():
+   137→                self.requests[request.id] = request
+   138→                self.graph.add_pending(request.sender, request.receiver)
+   139→
+   140→            for post in db.fetch_all_posts():
+   141→                self.posts.append(post)
+   142→                self.posts_by_id[post.id] = post
+   143→                self._post_counts[post.author] = self._post_counts.get(post.author, 0) + 1
+   144→
+   145→            self.likes = db.fetch_likes()
+   146→            self.comments = db.fetch_comments()
+   147→
+   148→            for note in db.fetch_all_notifications():
+   149→                self.notifications.setdefault(note.recipient, []).append(note)
+   150→
+   151→    # ---------------------------------------------------------------------- #
+   152→    # Trie maintenance
+   153→    # ---------------------------------------------------------------------- #
+   154→    def _index_user(self, user: User) -> None:
+   155→        """Insert a student's searchable keywords (username + name words)
+   156→        into the Trie."""
+   157→        keywords = [user.username] + user.full_name.split()
+   158→        for keyword in keywords:
+   159→            self.trie.insert(keyword, user.username)
+   160→        self._indexed_keywords[user.username] = keywords
+   161→
+   162→    def _reindex_user(self, user: User) -> None:
+   163→        """Remove the old Trie keywords then insert the fresh ones —
+   164→        called after a profile edit renames a student."""
+   165→        for keyword in self._indexed_keywords.get(user.username, []):
+   166→            self.trie.remove(keyword, user.username)
+   167→        self._index_user(user)
+   168→
+   169→    # ====================================================================== #
+   170→    # Authentication
+   171→    # ====================================================================== #
+   172→    def register(self, username, password, full_name, programme, year,
+   173→                 bio, skills, interests) -> User:
+   174→        with self._lock:
+   175→            username = (username or "").strip().lower()
+   176→            if not USERNAME_PATTERN.match(username):
+   177→                raise ApiError(
+   178→                    "Username must be 3-24 characters: lowercase letters, "
+   179→                    "digits or underscore.", 400)
+   180→            # O(1) duplicate check against the users hash table — the
+   181→            # UNIQUE constraint in SQLite is the second line of defence.
+   182→            if username in self.users:
+   183→                raise ApiError("That username is already taken.", 409)
+   184→            if not password or len(password) < PASSWORD_MIN:
+   185→                raise ApiError(
+   186→                    f"Password must be at least {PASSWORD_MIN} characters.", 400)
+   187→            full_name = (full_name or "").strip()
+   188→            if not full_name or len(full_name) > 60:
+   189→                raise ApiError("Please provide your full name.", 400)
+   190→
+   191→            user = User(
+   192→                username=username,
+   193→                full_name=full_name,
+   194→                password_hash=hash_password(password),
+   195→                programme=(programme or "").strip()[:60],
+   196→                year=(year or "").strip()[:20],
+   197→                bio=(bio or "").strip()[:280],
+   198→                skills=clean_list(skills),
+   199→                interests=clean_list(interests),
+   200→                created_at=now_iso(),
+   201→            )
+   202→            db.insert_user(user)              # persist
+   203→            self.users[username] = user       # memory hash table
+   204→            self.graph.add_vertex(username)    # new graph vertex
+   205→            self._index_user(user)            # searchable in the Trie
+   206→            return user
+   207→
+   208→    def login(self, username, password) -> User:
+   209→        with self._lock:
+   210→            username = (username or "").strip().lower()
+   211→            user = self.users.get(username)    # O(1) hash lookup
+   212→            if user is None or not verify_password(password or "", user.password_hash):
+   213→                raise ApiError("Invalid username or password.", 401)
+   214→            return user
+   215→
+   216→    def require_user(self, username: str) -> User:
+   217→        user = self.users.get(username)
+   218→        if user is None:
+   219→            raise ApiError("Student not found.", 404)
+   220→        return user
+   221→
+   222→    # ====================================================================== #
+   223→    # Profile
+   224→    # ====================================================================== #
+   225→    def update_profile(self, username, full_name, programme, year, bio,
+   226→                       skills, interests) -> User:
+   227→        with self._lock:
+   228→            user = self.require_user(username)
+   229→            full_name = (full_name or "").strip()
+   230→            if not full_name or len(full_name) > 60:
+   231→                raise ApiError("Full name cannot be empty.", 400)
+   232→            user.full_name = full_name
+   233→            user.programme = (programme or "").strip()[:60]
+   234→            user.year = (year or "").strip()[:20]
+   235→            user.bio = (bio or "").strip()[:280]
+   236→            user.skills = clean_list(skills)
+   237→            user.interests = clean_list(interests)
+   238→            db.update_user_profile(username, user.full_name, user.programme,
+   239→                                    user.year, user.bio, user.skills,
+   240→                                    user.interests)
+   241→            self._reindex_user(user)          # keep the Trie fresh
+   242→            return user
+   243→
+   244→    # ====================================================================== #
+   245→    # Connection requests (the pending directed edges)
+   246→    # ====================================================================== #
+   247→    def send_request(self, sender: str, receiver: str) -> ConnectionRequest:
+   248→        with self._lock:
+   249→            if sender == receiver:
+   250→                raise ApiError("You cannot connect with yourself.", 400)
+   251→            if receiver not in self.users:
+   252→                raise ApiError("Student not found.", 404)
+   253→            if self.graph.is_connected(sender, receiver):
+   254→                raise ApiError("You are already connected with this student.", 409)
+   255→            if self.graph.pending_direction(sender, receiver):
+   256→                raise ApiError(
+   257→                    "There is already a pending request between you two.", 409)
+   258→
+   259→            created = now_iso()
+   260→            request_id = db.insert_request(sender, receiver, created)
+   261→            request = ConnectionRequest(request_id, sender, receiver, PENDING, created)
+   262→            self.requests[request_id] = request
+   263→            self.graph.add_pending(sender, receiver)   # directed edge
+   264→            self._notify(receiver, "request_received", sender,
+   265→                         f"{self.users[sender].full_name} sent you a "
+   266→                         "connection request")
+   267→            return request
+   268→
+   269→    def accept_request(self, request_id: int, acting_user: str) -> dict:
+   270→        """Accepting converts the directed pending edge into an UNDIRECTED
+   271→        connection edge — the core graph transition of the platform."""
+   272→        with self._lock:
+   273→            request = self._require_pending_request(request_id)
+   274→            if request.receiver != acting_user:
+   275→                raise ApiError("Only the receiver can accept this request.", 403)
+   276→            sender, receiver = request.sender, request.receiver
+   277→            if self.graph.is_connected(sender, receiver):
+   278→                self._finish_request(request)
+   279→                raise ApiError("You are already connected with this student.", 409)
+   280→
+   281→            self.graph.remove_pending(sender, receiver)   # drop directed edge
+   282→            self.graph.add_edge(sender, receiver)         # add undirected edge
+   283→            db.insert_connection(sender, receiver, now_iso())
+   284→            self._finish_request(request)
+   285→            self._notify(sender, "request_accepted", receiver,
+   286→                         f"{self.users[receiver].full_name} accepted your "
+   287→                         "connection request")
+   288→            return {"connected_with": sender}
+   289→
+   290→    def reject_request(self, request_id: int, acting_user: str) -> dict:
+   291→        with self._lock:
+   292→            request = self._require_pending_request(request_id)
+   293→            if request.receiver != acting_user:
+   294→                raise ApiError("Only the receiver can reject this request.", 403)
+   295→            self._finish_request(request)     # rejected -> never an edge
+   296→            self._notify(request.sender, "request_rejected", acting_user,
+   297→                         f"{self.users[acting_user].full_name} declined "
+   298→                         "your connection request")
+   299→            return {"rejected": request.sender}
+   300→
+   301→    def cancel_request(self, request_id: int, acting_user: str) -> dict:
+   302→        with self._lock:
+   303→            request = self._require_pending_request(request_id)
+   304→            if request.sender != acting_user:
+   305→                raise ApiError("Only the sender can cancel this request.", 403)
+   306→            self._finish_request(request)
+   307→            return {"cancelled": request.receiver}
+   308→
+   309→    def _require_pending_request(self, request_id) -> ConnectionRequest:
+   310→        request = self.requests.get(request_id)
+   311→        if request is None or request.status != PENDING:
+   312→            raise ApiError("This request no longer exists.", 404)
+   313→        return request
+   314→
+   315→    def _finish_request(self, request: ConnectionRequest) -> None:
+   316→        """Terminal state: remove the directed edge everywhere (memory + DB)."""
+   317→        self.graph.remove_pending(request.sender, request.receiver)
+   318→        self.requests.pop(request.id, None)
+   319→        db.delete_request(request.id)
+   320→
+   321→    def remove_connection(self, acting_user: str, other: str) -> dict:
+   322→        with self._lock:
+   323→            if other not in self.users:
+   324→                raise ApiError("Student not found.", 404)
+   325→            if not self.graph.is_connected(acting_user, other):
+   326→                raise ApiError("You are not connected with this student.", 409)
+   327→            self.graph.remove_edge(acting_user, other)
+   328→            db.delete_connection(acting_user, other)
+   329→            return {"removed": other}
+   330→
+   331→    # ====================================================================== #
+   332→    # Posts, likes, comments
+   333→    # ====================================================================== #
+   334→    def create_post(self, author: str, content: str) -> Post:
+   335→        content = (content or "").strip()
+   336→        if not content:
+   337→            raise ApiError("Post content cannot be empty.", 400)
+   338→        if len(content) > POST_MAX_CHARS:
+   339→            raise ApiError(f"Posts are limited to {POST_MAX_CHARS} characters.", 400)
+   340→        with self._lock:
+   341→            created = now_iso()
+   342→            post = Post(db.insert_post(author, content, created),
+   343→                        author, content, created)
+   344→            self.posts.append(post)
+   345→            self.posts_by_id[post.id] = post
+   346→            self._post_counts[author] = self._post_counts.get(author, 0) + 1
+   347→            return post
+   348→
+   349→    def delete_post(self, post_id: int, acting_user: str) -> dict:
+   350→        with self._lock:
+   351→            post = self.posts_by_id.get(post_id)
+   352→            if post is None:
+   353→                raise ApiError("Post not found.", 404)
+   354→            if post.author != acting_user:
+   355→                raise ApiError("You can only delete your own posts.", 403)
+   356→            db.delete_post(post_id)          # cascades likes + comments rows
+   357→            self.posts.remove(post)
+   358→            self.posts_by_id.pop(post_id, None)
+   359→            self.likes.pop(post_id, None)
+   360→            self.comments.pop(post_id, None)
+   361→            self._post_counts[post.author] = self._post_counts.get(post.author, 1) - 1
+   362→            return {"deleted": post_id}
+   363→
+   364→    def toggle_like(self, post_id: int, acting_user: str) -> dict:
+   365→        with self._lock:
+   366→            post = self.posts_by_id.get(post_id)
+   367→            if post is None:
+   368→                raise ApiError("Post not found.", 404)
+   369→            likers = self.likes.setdefault(post_id, set())
+   370→            if acting_user in likers:
+   371→                likers.discard(acting_user)
+   372→                db.delete_like(post_id, acting_user)
+   373→                liked = False
+   374→            else:
+   375→                likers.add(acting_user)
+   376→                db.insert_like(post_id, acting_user, now_iso())
+   377→                liked = True
+   378→                if post.author != acting_user:
+   379→                    self._notify(post.author, "post_liked", acting_user,
+   380→                                 f"{self.users[acting_user].full_name} "
+   381→                                 "liked your post")
+   382→            return {"liked": liked, "likes": len(likers)}
+   383→
+   384→    def add_comment(self, post_id: int, acting_user: str, content: str) -> Comment:
+   385→        content = (content or "").strip()
+   386→        if not content:
+   387→            raise ApiError("Comment cannot be empty.", 400)
+   388→        if len(content) > 500:
+   389→            raise ApiError("Comments are limited to 500 characters.", 400)
+   390→        with self._lock:
+   391→            post = self.posts_by_id.get(post_id)
+   392→            if post is None:
+   393→                raise ApiError("Post not found.", 404)
+   394→            created = now_iso()
+   395→            comment = Comment(db.insert_comment(post_id, acting_user, content, created),
+   396→                              post_id, acting_user, content, created)
+   397→            self.comments.setdefault(post_id, []).append(comment)
+   398→            if post.author != acting_user:
+   399→                self._notify(post.author, "post_commented", acting_user,
+   400→                             f"{self.users[acting_user].full_name} "
+   401→                             "commented on your post")
+   402→            return comment
+   403→
+   404→    # ====================================================================== #
+   405→    # Read models (all computed in memory with the DSA modules)
+   406→    # ====================================================================== #
+   407→    def feed(self, username: str) -> List[dict]:
+   408→        """News feed = posts by the user and their first-degree connections,
+   409→        ordered newest-first through the heap priority queue."""
+   410→        with self._lock:
+   411→            authors = self.graph.neighbors(username) | {username}
+   412→            candidates = [p for p in self.posts if p.author in authors]
+   413→            return [self.serialize_post(p, username)
+   414→                    for p in self._heap_ordered(candidates)]
+   415→
+   416→    def posts_by(self, username: str, viewer: str) -> List[dict]:
+   417→        with self._lock:
+   418→            own = [p for p in self.posts if p.author == username]
+   419→            return [self.serialize_post(p, viewer)
+   420→                    for p in self._heap_ordered(own)]
+   421→
+   422→    def search(self, query: str, viewer: Optional[str]) -> List[dict]:
+   423→        """Prefix search through the Trie + relationship enrichment."""
+   424→        with self._lock:
+   425→            usernames = self.trie.prefix_matches(query, limit=20)
+   426→            results = []
+   427→            for username in usernames:
+   428→                results.append({
+   429→                    **self.user_summary(username),
+   430→                    "relationship": self.relationship(viewer, username),
+   431→                    "mutual_count": (len(self.graph.mutual(viewer, username))
+   432→                                     if viewer else 0),
+   433→                })
+   434→            return results
+   435→
+   436→    def recommendations(self, viewer: str, limit: int = 10) -> List[dict]:
+   437→        """People you may know — Jaccard + mutuals + profile similarity,
+   438→        ranked with the bounded top-K heap."""
+   439→        with self._lock:
+   440→            profiles = {
+   441→                user.username: {
+   442→                    "programme": user.programme,
+   443→                    "year": user.year,
+   444→                    "skills": user.skills,
+   445→                    "interests": user.interests,
+   446→                }
+   447→                for user in self.users.values()
+   448→            }
+   449→            ranked = people_you_may_know(self.graph, viewer, profiles, limit)
+   450→            enriched = []
+   451→            for info in ranked:
+   452→                enriched.append({
+   453→                    **self.user_summary(info["username"]),
+   454→                    **info,
+   455→                    "relationship": self.relationship(viewer, info["username"]),
+   456→                })
+   457→            return enriched
+   458→
+   459→    def connections_of(self, username: str) -> List[dict]:
+   460→        with self._lock:
+   461→            neighbors = self.graph.neighbors(username)
+   462→            return [{
+   463→                **self.user_summary(neighbor),
+   464→                "mutual_count": len(self.graph.mutual(username, neighbor)),
+   465→            } for neighbor in sorted(neighbors)]
+   466→
+   467→    def degrees_of(self, username: str) -> dict:
+   468→        """First / second / third-degree network via BFS levels."""
+   469→        with self._lock:
+   470→            buckets, beyond = connection_degrees(self.graph, username)
+   471→            lists = {
+   472→                "first": [self.user_summary(u) for u in sorted(buckets[1])][:50],
+   473→                "second": [self.user_summary(u) for u in sorted(buckets[2])][:50],
+   474→                "third": [self.user_summary(u) for u in sorted(buckets[3])][:50],
+   475→            }
+   476→            counts = {
+   477→                "first": len(buckets[1]),
+   478→                "second": len(buckets[2]),
+   479→                "third": len(buckets[3]),
+   480→                "beyond": len(beyond),
+   481→            }
+   482→            return {"counts": counts, "lists": lists}
+   483→
+   484→    def mutual_with(self, username: str, other: str) -> List[dict]:
+   485→        with self._lock:
+   486→            if other not in self.users:
+   487→                raise ApiError("Student not found.", 404)
+   488→            return [self.user_summary(m)
+   489→                    for m in sorted(self.graph.mutual(username, other))]
+   490→
+   491→    def path_between(self, username: str, other: str) -> dict:
+   492→        """Shortest connection chain via BFS (fewest intermediate students)."""
+   493→        with self._lock:
+   494→            if other not in self.users:
+   495→                raise ApiError("Student not found.", 404)
+   496→            if other == username:
+   497→                raise ApiError("That is your own profile.", 400)
+   498→            chain = shortest_path(self.graph, username, other)
+   499→            return {
+   500→                "source": username,
+   501→                "target": other,
+   502→                "connected": self.graph.is_connected(username, other),
+   503→                "path": chain,
+   504→                "distance": (len(chain) - 1) if chain else None,
+   505→            }
+   506→
+   507→    def requests_for(self, username: str) -> dict:
+   508→        """Pending requests received + sent (FIFO order, oldest first)."""
+   509→        with self._lock:
+   510→            received, sent = [], []
+   511→            for request in sorted(self.requests.values(), key=lambda r: r.id):
+   512→                if request.receiver == username:
+   513→                    received.append({
+   514→                        "id": request.id,
+   515→                        "created_at": request.created_at,
+   516→                        "sender": self.user_summary(request.sender),
+   517→                    })
+   518→                if request.sender == username:
+   519→                    sent.append({
+   520→                        "id": request.id,
+   521→                        "created_at": request.created_at,
+   522→                        "receiver": self.user_summary(request.receiver),
+   523→                    })
+   524→            return {"received": received, "sent": sent}
+   525→
+   526→    def user_profile(self, username: str, viewer: Optional[str]) -> dict:
+   527→        with self._lock:
+   528→            user = self.require_user(username)
+   529→            mutual = (self.graph.mutual(viewer, username)
+   530→                      if viewer and viewer != username else set())
+   531→            return {
+   532→                **self.user_summary(username),
+   533→                "created_at": user.created_at,
+   534→                "relationship": self.relationship(viewer, username),
+   535→                "mutual_count": len(mutual),
+   536→                "mutual": [self.user_summary(m) for m in sorted(mutual)[:6]],
+   537→            }
+   538→
+   539→    def notifications_for(self, username: str, limit: int = 50) -> dict:
+   540→        with self._lock:
+   541→            notes = self.notifications.get(username, [])
+   542→            unread = sum(1 for note in notes if not note.is_read)
+   543→            newest_first = list(reversed(notes))[:limit]
+   544→            return {
+   545→                "notifications": [self._serialize_note(n) for n in newest_first],
+   546→                "unread": unread,
+   547→            }
+   548→
+   549→    def mark_notifications_read(self, username: str) -> dict:
+   550→        with self._lock:
+   551→            db.mark_all_notifications_read(username)
+   552→            for note in self.notifications.get(username, []):
+   553→                note.is_read = True
+   554→            return {"ok": True}
+   555→
+   556→    def stats(self) -> dict:
+   557→        with self._lock:
+   558→            return {
+   559→                "students": len(self.users),
+   560→                "connections": self.graph.edge_count(),
+   561→                "posts": len(self.posts),
+   562→                "pending_requests": len(self.requests),
+   563→            }
+   564→
+   565→    # ====================================================================== #
+   566→    # Serialisation helpers
+   567→    # ====================================================================== #
+   568→    def relationship(self, viewer: Optional[str], other: str) -> str:
+   569→        """self | connected | pending_out | pending_in | none"""
+   570→        if viewer is None:
+   571→            return "none"
+   572→        if viewer == other:
+   573→            return "self"
+   574→        if self.graph.is_connected(viewer, other):
+   575→            return "connected"
+   576→        direction = self.graph.pending_direction(viewer, other)
+   577→        if direction == "out":
+   578→            return "pending_out"
+   579→        if direction == "in":
+   580→            return "pending_in"
+   581→        return "none"
+   582→
+   583→    def user_summary(self, username: str) -> dict:
+   584→        user = self.users[username]
+   585→        return {
+   586→            "username": user.username,
+   587→            "full_name": user.full_name,
+   588→            "programme": user.programme,
+   589→            "year": user.year,
+   590→            "bio": user.bio,
+   591→            "skills": list(user.skills),
+   592→            "interests": list(user.interests),
+   593→            "connections_count": self.graph.degree(username),
+   594→            "posts_count": self._post_counts.get(username, 0),
+   595→        }
+   596→
+   597→    def serialize_post(self, post: Post, viewer: Optional[str]) -> dict:
+   598→        likers = self.likes.get(post.id, set())
+   599→        return {
+   600→            "id": post.id,
+   601→            "author": self.user_summary(post.author),
+   602→            "content": post.content,
+   603→            "created_at": post.created_at,
+   604→            "likes": len(likers),
+   605→            "liked_by_me": bool(viewer and viewer in likers),
+   606→            "comments": [{
+   607→                "id": comment.id,
+   608→                "author": self.user_summary(comment.author),
+   609→                "content": comment.content,
+   610→                "created_at": comment.created_at,
+   611→            } for comment in self.comments.get(post.id, [])],
+   612→            "is_mine": bool(viewer and post.author == viewer),
+   613→        }
+   614→
+   615→    def _serialize_note(self, note: Notification) -> dict:
+   616→        actor = (self.user_summary(note.actor)
+   617→                 if note.actor and note.actor in self.users else None)
+   618→        return {
+   619→            "id": note.id,
+   620→            "kind": note.kind,
+   621→            "actor": actor,
+   622→            "message": note.message,
+   623→            "is_read": note.is_read,
+   624→            "created_at": note.created_at,
+   625→        }
+   626→
+   627→    # ====================================================================== #
+   628→    # Internal utilities
+   629→    # ====================================================================== #
+   630→    def _heap_ordered(self, posts: List[Post]) -> List[Post]:
+   631→        """Newest-first ordering via the priority queue.
+   632→
+   633→        The heap key is -timestamp (a max-heap on time): the smallest key is
+   634→        the newest post, so repeated pops yield strictly newest-first order.
+   635→        """
+   636→        heap = MinHeap.heapify(posts, key=lambda post: -ts_of(post.created_at))
+   637→        ordered: List[Post] = []
+   638→        while not heap.is_empty():
+   639→            ordered.append(heap.pop())
+   640→        return ordered
+   641→
+   642→    def _notify(self, recipient: str, kind: str, actor: str, message: str) -> None:
+   643→        """Enqueue a notification for a student (FIFO per recipient)."""
+   644→        created = now_iso()
+   645→        note = Notification(
+   646→            db.insert_notification(recipient, kind, actor, message, created),
+   647→            recipient, kind, actor, message, False, created,
+   648→        )
+   649→        self.notifications.setdefault(recipient, []).append(note)
+   650→
+   651→
+   652→# Module-level singleton shared by every Flask route.
+   653→network_state = Network()
+   654→

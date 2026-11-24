@@ -75,7 +75,7 @@ export function SearchView() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search students by name or username…"
           aria-label="Search students"
-          className="h-12 w-full rounded-xl border bg-white pl-10 pr-10 text-base shadow-sm outline-none transition-shadow placeholder:text-muted-foreground focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/20"
+          className="h-12 w-full rounded-xl border bg-white pl-10 pr-10 text-base shadow-sm outline-none transition-shadow placeholder:text-muted-foreground focus:border-orange-400 focus:ring-2 focus:ring-orange-400/20"
         />
         {searchQuery.isFetching ? (
           <Loader2
@@ -127,6 +127,7 @@ export function SearchView() {
                       <UserAvatar
                         username={item.username}
                         fullName={item.full_name}
+                        avatarUrl={item.avatar_url}
                         onClick={() => openProfile(item.username)}
                       />
                       <div className="min-w-0 flex-1">

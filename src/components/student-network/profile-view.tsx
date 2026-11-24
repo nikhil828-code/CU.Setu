@@ -1,19 +1,21 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
   ArrowRight,
   ArrowLeft,
+  Camera,
   CalendarDays,
   Layers,
+  Loader2,
   Pencil,
   Route,
   Sparkles,
   UserX,
   Users,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { ConnectButton } from '@/components/student-network/connect-button'
 import { EditProfileDialog } from '@/components/student-network/edit-profile-dialog'
@@ -26,10 +28,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { apiFetch } from '@/lib/api'
+import { toast } from '@/hooks/use-toast'
+import { apiFetch, apiUpload, mediaSrc } from '@/lib/api'
 import { gradientFor } from '@/lib/avatar'
+import { invalidateNetwork } from '@/lib/invalidate'
 import { fullDate } from '@/lib/time'
-import type { PathResponse, Post, ProfileResponse } from '@/lib/types'
+import type { PathResponse, Post, ProfileResponse, UserSummary } from '@/lib/types'
 import { useAppStore } from '@/store/app-store'
 
 function ProfileSkeleton() {
@@ -81,7 +85,7 @@ function PathChain({ path, distance }: { path: string[]; distance: number }) {
                 <button
                   type="button"
                   onClick={() => openProfile(username)}
-                  className="flex items-center gap-2 rounded-full border bg-white py-1 pl-1 pr-3 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
+                  className="flex items-center gap-2 rounded-full border bg-white py-1 pl-1 pr-3 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
                 >
                   <UserAvatar username={username} size="sm" />
                   <span className="text-sm font-medium text-foreground">
@@ -105,12 +109,75 @@ function PathChain({ path, distance }: { path: string[]; distance: number }) {
 
 export function ProfileView() {
   const me = useAppStore((s) => s.me)
+  const setMe = useAppStore((s) => s.setMe)
   const target = useAppStore((s) => s.profileTarget) ?? me?.username ?? ''
   const goto = useAppStore((s) => s.goto)
   const openProfile = useAppStore((s) => s.openProfile)
+  const queryClient = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const coverInputRef = useRef<HTMLInputElement>(null)
 
   const isSelf = me !== null && target === me.username
+
+  // Profile photo / profile background uploads (own profile only).
+  const photoMutation = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData()
+      form.append('photo', file)
+      return apiUpload<{ user: UserSummary }>('/profile/photo', form)
+    },
+    onSuccess: ({ user }) => {
+      setMe(user)
+      invalidateNetwork(queryClient)
+      toast({ title: 'Profile photo updated', description: 'Looking good!' })
+    },
+    onError: (error) => {
+      toast({
+        title: 'Could not update profile photo',
+        description:
+          error instanceof Error && error.message
+            ? error.message
+            : 'Please try a different image.',
+        variant: 'destructive',
+      })
+    },
+  })
+
+  const coverMutation = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData()
+      form.append('cover', file)
+      return apiUpload<{ user: UserSummary }>('/profile/cover', form)
+    },
+    onSuccess: ({ user }) => {
+      setMe(user)
+      invalidateNetwork(queryClient)
+      toast({ title: 'Profile background updated', description: 'Your banner is live.' })
+    },
+    onError: (error) => {
+      toast({
+        title: 'Could not update profile background',
+        description:
+          error instanceof Error && error.message
+            ? error.message
+            : 'Please try a different image.',
+        variant: 'destructive',
+      })
+    },
+  })
+
+  const onPickPhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = '' // allow re-selecting the same file later
+    if (file) photoMutation.mutate(file)
+  }
+
+  const onPickCover = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file) coverMutation.mutate(file)
+  }
 
   const userQuery = useQuery({
     queryKey: ['user', target],
@@ -141,7 +208,7 @@ export function ProfileView() {
           title="No profile selected"
           description="Head back to your feed and open a student profile."
           action={
-            <Button className="bg-[#101B3D] text-white hover:bg-[#182650]" onClick={() => goto('feed')}>
+            <Button className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700" onClick={() => goto('feed')}>
               Back to feed
             </Button>
           }
@@ -164,9 +231,9 @@ export function ProfileView() {
         <EmptyState
           icon={UserX}
           title="Student not found"
-          description="This account does not exist on CampusConnect anymore."
+          description="This account does not exist on CU.Setu anymore."
           action={
-            <Button className="bg-[#101B3D] text-white hover:bg-[#182650]" onClick={() => goto('feed')}>
+            <Button className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700" onClick={() => goto('feed')}>
               <ArrowLeft aria-hidden="true" />
               Back to feed
             </Button>
@@ -190,19 +257,85 @@ export function ProfileView() {
       >
         {/* Header card */}
         <Card className="overflow-hidden shadow-sm">
-          <div
-            className="h-28 w-full sm:h-32"
-            style={{ background: gradientFor(user.username) }}
-            aria-hidden="true"
-          />
+          <div className="relative">
+            {user.cover_url ? (
+               
+              <img
+                src={mediaSrc(user.cover_url)}
+                alt={`${user.full_name}'s profile background`}
+                className="h-28 w-full object-cover sm:h-36"
+              />
+            ) : (
+              <div
+                className="h-28 w-full sm:h-36"
+                style={{ background: gradientFor(user.username) }}
+                aria-hidden="true"
+              />
+            )}
+            {isSelf ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={coverMutation.isPending}
+                onClick={() => coverInputRef.current?.click()}
+                className="absolute right-3 top-3 h-8 gap-1.5 rounded-full bg-black/55 px-3 text-xs text-white shadow-md backdrop-blur hover:bg-black/70"
+                aria-label="Upload profile background"
+              >
+                {coverMutation.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Camera className="size-3.5" aria-hidden="true" />
+                )}
+                {user.cover_url ? 'Change background' : 'Add background'}
+              </Button>
+            ) : null}
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={onPickCover}
+              aria-hidden="true"
+              tabIndex={-1}
+            />
+          </div>
           <CardContent className="pb-6">
             <div className="flex items-end justify-between gap-4">
-              <UserAvatar
-                username={user.username}
-                fullName={user.full_name}
-                size="xl"
-                className="-mt-12 ring-4 ring-white"
-              />
+              <div className="relative">
+                <UserAvatar
+                  username={user.username}
+                  fullName={user.full_name}
+                  avatarUrl={user.avatar_url}
+                  size="xl"
+                  className="-mt-12 bg-white ring-4 ring-white"
+                />
+                {isSelf ? (
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={photoMutation.isPending}
+                    className="absolute -bottom-1 -right-1 flex size-8 items-center justify-center rounded-full bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 disabled:opacity-70"
+                    aria-label="Upload profile photo"
+                    title="Change profile photo"
+                  >
+                    {photoMutation.isPending ? (
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Camera className="size-4" aria-hidden="true" />
+                    )}
+                  </button>
+                ) : null}
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={onPickPhoto}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                />
+              </div>
               <div className="pb-1">
                 {isSelf ? (
                   <Button
@@ -237,7 +370,7 @@ export function ProfileView() {
                 {user.year ? (
                   <Badge
                     variant="outline"
-                    className="border-violet-200 bg-violet-50 font-medium text-violet-700"
+                    className="border-blue-200 bg-blue-50 font-medium text-blue-700"
                   >
                     {user.year}
                   </Badge>
@@ -287,7 +420,7 @@ export function ProfileView() {
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <Route className="size-4 text-[#2563EB]" aria-hidden="true" />
+                <Route className="size-4 text-orange-600" aria-hidden="true" />
                 Connection path
               </CardTitle>
             </CardHeader>
@@ -315,7 +448,7 @@ export function ProfileView() {
         {!isSelf && user.mutual.length > 0 ? (
           <Card className="shadow-sm">
             <CardContent className="flex items-center gap-4 p-4">
-              <Users className="size-4 shrink-0 text-[#2563EB]" aria-hidden="true" />
+              <Users className="size-4 shrink-0 text-orange-600" aria-hidden="true" />
               <div className="flex flex-1 flex-wrap items-center gap-3">
                 {user.mutual.map((mutual) => (
                   <Tooltip key={mutual.username}>
@@ -323,6 +456,7 @@ export function ProfileView() {
                       <UserAvatar
                         username={mutual.username}
                         fullName={mutual.full_name}
+                        avatarUrl={mutual.avatar_url}
                         onClick={() => openProfile(mutual.username)}
                       />
                     </TooltipTrigger>
@@ -368,7 +502,7 @@ export function ProfileView() {
                     <Badge
                       key={interest}
                       variant="outline"
-                      className="border-violet-200 bg-violet-50 font-medium text-violet-700"
+                      className="border-blue-200 bg-blue-50 font-medium text-blue-700"
                     >
                       {interest}
                     </Badge>
@@ -383,7 +517,7 @@ export function ProfileView() {
         <section aria-label={`Posts by ${user.full_name}`}>
           <SectionHeader
             title="Posts"
-            subtitle={`Everything ${isSelf ? 'you' : user.full_name.split(' ')[0]} shared on CampusConnect`}
+            subtitle={`Everything ${isSelf ? 'you' : user.full_name.split(' ')[0]} shared on CU.Setu`}
           />
           {postsQuery.isLoading ? (
             <div className="space-y-4">
@@ -402,7 +536,7 @@ export function ProfileView() {
               action={
                 isSelf ? (
                   <Button
-                    className="bg-[#101B3D] text-white hover:bg-[#182650]"
+                    className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
                     onClick={() => goto('feed')}
                   >
                     Go to feed

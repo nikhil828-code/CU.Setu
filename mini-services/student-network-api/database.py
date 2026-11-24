@@ -22,7 +22,7 @@ safe under Flask's multi-threaded dev server.
 """
 
 import sqlite3
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from config import DB_PATH
 from models import Comment, ConnectionRequest, Notification, Post, User
@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS users (
     bio           TEXT NOT NULL DEFAULT '',
     skills        TEXT NOT NULL DEFAULT '',  -- comma separated (SQLite has no arrays)
     interests     TEXT NOT NULL DEFAULT '',
+    avatar_url    TEXT NOT NULL DEFAULT '',  -- uploaded profile photo URL
+    cover_url     TEXT NOT NULL DEFAULT '',  -- uploaded profile background URL
     created_at    TEXT NOT NULL
 );
 
@@ -68,6 +70,8 @@ CREATE TABLE IF NOT EXISTS posts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     author     TEXT NOT NULL,
     content    TEXT NOT NULL,
+    media_url  TEXT NOT NULL DEFAULT '',   -- uploaded photo / video URL
+    media_type TEXT NOT NULL DEFAULT '',   -- '' | 'image' | 'video'
     created_at TEXT NOT NULL
 );
 
@@ -86,6 +90,14 @@ CREATE TABLE IF NOT EXISTS comments (
     created_at TEXT NOT NULL
 );
 
+-- Comment likes: same "one like per user" rule as post likes.
+CREATE TABLE IF NOT EXISTS comment_likes (
+    comment_id INTEGER NOT NULL,
+    username   TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (comment_id, username)
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     recipient  TEXT NOT NULL,
@@ -97,6 +109,15 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 """
 
+# Columns added after the first release — applied to older database files
+# with ALTER TABLE so existing data survives the upgrade untouched.
+_MIGRATIONS = (
+    "ALTER TABLE users ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE users ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE posts ADD COLUMN media_url TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE posts ADD COLUMN media_type TEXT NOT NULL DEFAULT ''",
+)
+
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10)
@@ -105,11 +126,18 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create all tables if they do not exist yet."""
+    """Create all tables if they do not exist yet, then apply any column
+    migrations an older database file may still be missing."""
     conn = _connect()
     try:
         with conn:
             conn.executescript(_SCHEMA)
+            for statement in _MIGRATIONS:
+                try:
+                    conn.execute(statement)
+                except sqlite3.OperationalError:
+                    # Column already exists — nothing to migrate.
+                    pass
     finally:
         conn.close()
 
@@ -123,10 +151,12 @@ def insert_user(user: User) -> None:
         with conn:
             conn.execute(
                 "INSERT INTO users (username, password_hash, full_name, programme,"
-                " year, bio, skills, interests, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                " year, bio, skills, interests, avatar_url, cover_url, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (user.username, user.password_hash, user.full_name, user.programme,
                  user.year, user.bio, ",".join(user.skills),
-                 ",".join(user.interests), user.created_at),
+                 ",".join(user.interests), user.avatar_url, user.cover_url,
+                 user.created_at),
             )
     finally:
         conn.close()
@@ -148,6 +178,8 @@ def fetch_all_users() -> List[User]:
             bio=row["bio"],
             skills=[s for s in row["skills"].split(",") if s],
             interests=[s for s in row["interests"].split(",") if s],
+            avatar_url=row["avatar_url"] or "",
+            cover_url=row["cover_url"] or "",
             created_at=row["created_at"],
         )
         for row in rows
@@ -165,6 +197,34 @@ def update_user_profile(username: str, full_name: str, programme: str,
                 " skills=?, interests=? WHERE username=?",
                 (full_name, programme, year, bio,
                  ",".join(skills), ",".join(interests), username),
+            )
+    finally:
+        conn.close()
+
+
+def update_user_media(username: str, avatar_url: Optional[str] = None,
+                      cover_url: Optional[str] = None) -> None:
+    """Persist an uploaded profile photo / profile background URL.
+
+    Only the supplied field is written, so each upload updates exactly one
+    column (None = leave unchanged, "" = clear back to the default).
+    """
+    assignments, params = [], []
+    if avatar_url is not None:
+        assignments.append("avatar_url=?")
+        params.append(avatar_url)
+    if cover_url is not None:
+        assignments.append("cover_url=?")
+        params.append(cover_url)
+    if not assignments:
+        return
+    params.append(username)
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                f"UPDATE users SET {', '.join(assignments)} WHERE username=?",
+                tuple(params),
             )
     finally:
         conn.close()
@@ -270,13 +330,15 @@ def delete_request(request_id: int) -> None:
 # --------------------------------------------------------------------------- #
 # Posts
 # --------------------------------------------------------------------------- #
-def insert_post(author: str, content: str, created_at: str) -> int:
+def insert_post(author: str, content: str, created_at: str,
+                media_url: str = "", media_type: str = "") -> int:
     conn = _connect()
     try:
         with conn:
             cursor = conn.execute(
-                "INSERT INTO posts (author, content, created_at) VALUES (?,?,?)",
-                (author, content, created_at),
+                "INSERT INTO posts (author, content, media_url, media_type,"
+                " created_at) VALUES (?,?,?,?,?)",
+                (author, content, media_url, media_type, created_at),
             )
             post_id = cursor.lastrowid
     finally:
@@ -290,15 +352,21 @@ def fetch_all_posts() -> List[Post]:
         rows = conn.execute("SELECT * FROM posts ORDER BY id").fetchall()
     finally:
         conn.close()
-    return [Post(row["id"], row["author"], row["content"], row["created_at"])
+    return [Post(row["id"], row["author"], row["content"], row["created_at"],
+                 row["media_url"] or "", row["media_type"] or "")
             for row in rows]
 
 
 def delete_post(post_id: int) -> None:
-    """Delete a post together with its likes and comments."""
+    """Delete a post together with its likes, comments and comment likes."""
     conn = _connect()
     try:
         with conn:
+            conn.execute(
+                "DELETE FROM comment_likes WHERE comment_id IN"
+                " (SELECT id FROM comments WHERE post_id=?)",
+                (post_id,),
+            )
             conn.execute("DELETE FROM posts WHERE id=?", (post_id,))
             conn.execute("DELETE FROM likes WHERE post_id=?", (post_id,))
             conn.execute("DELETE FROM comments WHERE post_id=?", (post_id,))
@@ -346,7 +414,7 @@ def fetch_likes() -> Dict[int, Set[str]]:
 
 
 # --------------------------------------------------------------------------- #
-# Comments
+# Comments + comment likes
 # --------------------------------------------------------------------------- #
 def insert_comment(post_id: int, author: str, content: str,
                    created_at: str) -> int:
@@ -378,6 +446,49 @@ def fetch_comments() -> Dict[int, List[Comment]]:
                     row["content"], row["created_at"])
         )
     return grouped
+
+
+# --------------------------------------------------------------------------- #
+# Comment likes
+# --------------------------------------------------------------------------- #
+def insert_comment_like(comment_id: int, username: str, created_at: str) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO comment_likes (comment_id, username,"
+                " created_at) VALUES (?,?,?)",
+                (comment_id, username, created_at),
+            )
+    finally:
+        conn.close()
+
+
+def delete_comment_like(comment_id: int, username: str) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                "DELETE FROM comment_likes WHERE comment_id=? AND username=?",
+                (comment_id, username),
+            )
+    finally:
+        conn.close()
+
+
+def fetch_comment_likes() -> Dict[int, Set[str]]:
+    """Returns hash table: comment_id -> set of usernames who liked it."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT comment_id, username FROM comment_likes"
+        ).fetchall()
+    finally:
+        conn.close()
+    likes: Dict[int, Set[str]] = {}
+    for row in rows:
+        likes.setdefault(row["comment_id"], set()).add(row["username"])
+    return likes
 
 
 # --------------------------------------------------------------------------- #

@@ -68,7 +68,7 @@ function DegreeSection({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <div className="rounded-lg border bg-white">
-        <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]">
+        <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500">
           <span className="text-sm font-semibold">{title}</span>
           <Badge variant="secondary" className="tabular-nums">{count}</Badge>
           <ChevronDown
@@ -86,6 +86,7 @@ function DegreeSection({
                   <UserAvatar
                     username={user.username}
                     fullName={user.full_name}
+                    avatarUrl={user.avatar_url}
                     onClick={() => openProfile(user.username)}
                   />
                   <div className="min-w-0 flex-1">
@@ -184,7 +185,7 @@ export function ConnectionsView() {
         <Card className="mb-6 shadow-sm">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <Network className="size-4 text-[#2563EB]" aria-hidden="true" />
+              <Network className="size-4 text-orange-600" aria-hidden="true" />
               Degrees of separation
             </CardTitle>
           </CardHeader>
@@ -235,7 +236,7 @@ export function ConnectionsView() {
             description="Your first edge is waiting — discover students you may know and send a request."
             action={
               <Button
-                className="bg-[#101B3D] text-white hover:bg-[#182650]"
+                className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
                 onClick={() => goto('discover')}
               >
                 Discover students
@@ -257,6 +258,7 @@ export function ConnectionsView() {
                       <UserAvatar
                         username={connection.username}
                         fullName={connection.full_name}
+                        avatarUrl={connection.avatar_url}
                         onClick={() => openProfile(connection.username)}
                       />
                       <div className="min-w-0 flex-1">
@@ -285,7 +287,7 @@ export function ConnectionsView() {
                     <div className="mt-auto flex items-center gap-2 pt-4">
                       <Button
                         size="sm"
-                        className="flex-1 bg-[#101B3D] text-white hover:bg-[#182650]"
+                        className="flex-1 bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
                         onClick={() => openProfile(connection.username)}
                       >
                         View profile

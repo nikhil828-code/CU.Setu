@@ -36,7 +36,7 @@ function CountBadge({ value, className }: { value: number; className?: string })
   return (
     <span
       className={cn(
-        'inline-flex min-w-5 items-center justify-center rounded-full bg-gradient-to-r from-[#2563EB] to-[#7C3AED] px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white tabular-nums',
+        'inline-flex min-w-5 items-center justify-center rounded-full bg-gradient-to-r from-amber-400 to-orange-600 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white tabular-nums',
         className,
       )}
     >
@@ -154,8 +154,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-white/10 bg-[#0A1128] lg:flex">
         <div className="flex items-center gap-2.5 px-5 py-5">
-          <BrandMark className="size-8" />
-          <span className="text-lg font-semibold text-white">CampusConnect</span>
+          <BrandMark className="h-9 w-auto" />
+          <span className="text-lg font-semibold text-white">CU.Setu</span>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2" aria-label="Primary">
           {navItems.map((item) => {
@@ -175,7 +175,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 {active ? (
                   <span
-                    className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-[#2563EB] to-[#7C3AED]"
+                    className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-amber-400 to-orange-600"
                     aria-hidden="true"
                   />
                 ) : null}
@@ -190,7 +190,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
         <div className="border-t border-white/10 p-3">
           <div className="flex items-center gap-3 rounded-lg p-2">
-            <UserAvatar username={me.username} fullName={me.full_name} />
+            <UserAvatar username={me.username} fullName={me.full_name} avatarUrl={me.avatar_url} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-white">{me.full_name}</p>
               <p className="truncate text-xs text-slate-400">@{me.username}</p>
@@ -215,10 +215,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           type="button"
           onClick={() => goto('feed')}
           className="flex items-center gap-2"
-          aria-label="CampusConnect home"
+          aria-label="CU.Setu home"
         >
-          <BrandMark className="size-7" />
-          <span className="text-base font-semibold text-white">CampusConnect</span>
+          <BrandMark className="h-7 w-auto" />
+          <span className="text-base font-semibold text-white">CU.Setu</span>
         </button>
         <div className="flex items-center gap-1">
           <button
@@ -229,7 +229,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <Bell className="size-5" aria-hidden="true" />
             {unread > 0 ? (
-              <span className="absolute right-0.5 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gradient-to-r from-[#2563EB] to-[#7C3AED] px-1 text-[10px] font-semibold text-white tabular-nums">
+              <span className="absolute right-0.5 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gradient-to-r from-amber-400 to-orange-600 px-1 text-[10px] font-semibold text-white tabular-nums">
                 {unread > 9 ? '9+' : unread}
               </span>
             ) : null}
@@ -240,7 +240,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             aria-label="Open my profile"
             className="ml-1 flex items-center rounded-full p-1"
           >
-            <UserAvatar username={me.username} fullName={me.full_name} size="sm" />
+            <UserAvatar username={me.username} fullName={me.full_name} avatarUrl={me.avatar_url} size="sm" />
           </button>
         </div>
       </header>
@@ -268,13 +268,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 aria-current={active ? 'page' : undefined}
                 className={cn(
                   'flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors',
-                  active ? 'text-[#2563EB]' : 'text-muted-foreground hover:text-foreground',
+                  active ? 'text-orange-600' : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 <span className="relative">
                   <item.icon className="size-5" aria-hidden="true" />
                   {item.badge && item.badge > 0 ? (
-                    <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-gradient-to-r from-[#2563EB] to-[#7C3AED] px-1 text-[9px] font-semibold text-white">
+                    <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-gradient-to-r from-amber-400 to-orange-600 px-1 text-[9px] font-semibold text-white">
                         {item.badge > 9 ? '9+' : item.badge}
                     </span>
                   ) : null}

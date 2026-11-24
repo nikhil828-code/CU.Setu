@@ -122,7 +122,7 @@ export function RequestsView() {
               <TabsTrigger value="received">
                 Received
                 {received.length > 0 ? (
-                  <span className="ml-1.5 rounded-full bg-[#2563EB] px-1.5 py-0.5 text-[11px] font-semibold text-white tabular-nums">
+                  <span className="ml-1.5 rounded-full bg-orange-600 px-1.5 py-0.5 text-[11px] font-semibold text-white tabular-nums">
                     {received.length}
                   </span>
                 ) : null}
@@ -151,6 +151,7 @@ export function RequestsView() {
                       <UserAvatar
                         username={request.sender.username}
                         fullName={request.sender.full_name}
+                        avatarUrl={request.sender.avatar_url}
                         onClick={() => openProfile(request.sender.username)}
                       />
                       <div className="min-w-0 flex-1">
@@ -180,7 +181,7 @@ export function RequestsView() {
                         </Button>
                         <Button
                           size="sm"
-                          className="flex-1 bg-[#101B3D] text-white hover:bg-[#182650] sm:flex-none"
+                          className="flex-1 bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700 sm:flex-none"
                           onClick={() => acceptMutation.mutate(request.id)}
                           disabled={acceptMutation.isPending}
                         >
@@ -218,6 +219,7 @@ export function RequestsView() {
                       <UserAvatar
                         username={request.receiver.username}
                         fullName={request.receiver.full_name}
+                        avatarUrl={request.receiver.avatar_url}
                         onClick={() => openProfile(request.receiver.username)}
                       />
                       <div className="min-w-0 flex-1">

@@ -14,16 +14,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CampusConnect — University Student Network",
-  description: "The university network for builders. Share projects, grow your network and discover students — powered by real data structures: graphs, BFS, Trie and Jaccard similarity.",
-  keywords: ["CampusConnect", "student network", "university", "networking", "graph", "BFS", "Trie", "Jaccard"],
+  title: "CU.Setu — A bridge connecting the students of Chanakya University",
+  description: "The CU.Setu network for Chanakya University students. Share projects, grow your network and discover students — powered by real data structures: graphs, BFS, Trie and Jaccard similarity.",
+  keywords: ["CU.Setu", "Chanakya University", "student network", "networking", "graph", "BFS", "Trie", "Jaccard"],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/cu-setu-logo.png",
   },
   openGraph: {
-    title: "CampusConnect — University Student Network",
-    description: "The university network for builders. Graphs, BFS, Trie and Jaccard under the hood.",
-    siteName: "CampusConnect",
+    title: "CU.Setu — A bridge connecting the students of Chanakya University",
+    description: "Connect · Share · Grow — graphs, BFS, Trie and Jaccard under the hood.",
+    siteName: "CU.Setu",
     type: "website",
   },
 };

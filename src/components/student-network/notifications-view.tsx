@@ -40,9 +40,10 @@ const KIND_META: Record<
   post_liked: { icon: Heart, className: 'bg-rose-100 text-rose-600', label: 'Post liked' },
   post_commented: {
     icon: MessageCircle,
-    className: 'bg-violet-100 text-violet-600',
+    className: 'bg-orange-100 text-orange-600',
     label: 'New comment',
   },
+  comment_liked: { icon: Heart, className: 'bg-amber-100 text-amber-600', label: 'Comment liked' },
 }
 
 function NotificationSkeleton() {
@@ -149,6 +150,7 @@ export function NotificationsView() {
                       <UserAvatar
                         username={notification.actor.username}
                         fullName={notification.actor.full_name}
+                        avatarUrl={notification.actor.avatar_url}
                         size="sm"
                         outline={!notification.is_read}
                         onClick={() => openProfile(notification.actor?.username ?? '')}
@@ -164,7 +166,7 @@ export function NotificationsView() {
                     </div>
                     {!notification.is_read ? (
                       <span
-                        className="size-2 shrink-0 rounded-full bg-gradient-to-r from-[#2563EB] to-[#7C3AED]"
+                        className="size-2 shrink-0 rounded-full bg-gradient-to-r from-amber-400 to-orange-600"
                         aria-label="Unread"
                       />
                     ) : null}

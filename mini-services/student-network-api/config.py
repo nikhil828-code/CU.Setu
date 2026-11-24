@@ -36,3 +36,25 @@ PBKDF2_ITERATIONS = 100_000
 USERNAME_MIN, USERNAME_MAX = 3, 24
 PASSWORD_MIN = 6
 POST_MAX_CHARS = 1000
+
+# --------------------------------------------------------------------------- #
+# Uploaded media (profile photos, profile backgrounds, post photos / videos)
+# --------------------------------------------------------------------------- #
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+AVATAR_DIR = os.path.join(UPLOAD_DIR, "avatars")
+COVER_DIR = os.path.join(UPLOAD_DIR, "covers")
+POST_MEDIA_DIR = os.path.join(UPLOAD_DIR, "posts")
+
+for _dir in (UPLOAD_DIR, AVATAR_DIR, COVER_DIR, POST_MEDIA_DIR):
+    os.makedirs(_dir, exist_ok=True)
+
+# Largest single upload accepted by the Flask app (photos or videos).
+MAX_MEDIA_BYTES = 25 * 1024 * 1024          # 25 MB
+
+# Allowed file extensions per media kind.
+IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+VIDEO_EXTENSIONS = {"mp4", "webm", "mov"}
+MEDIA_TYPE_FOR_EXTENSION = {
+    **{ext: "image" for ext in IMAGE_EXTENSIONS},
+    **{ext: "video" for ext in VIDEO_EXTENSIONS},
+}

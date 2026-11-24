@@ -72,6 +72,7 @@ function RecommendationCard({
             <UserAvatar
               username={person.username}
               fullName={person.full_name}
+              avatarUrl={person.avatar_url}
               size="lg"
               onClick={() => openProfile(person.username)}
             />
@@ -152,7 +153,7 @@ function RecommendationCard({
                 <Badge
                   key={interest}
                   variant="outline"
-                  className="border-violet-200 bg-violet-50 font-medium text-violet-700"
+                  className="border-blue-200 bg-blue-50 font-medium text-blue-700"
                 >
                   {interest}
                 </Badge>
@@ -160,7 +161,7 @@ function RecommendationCard({
               {person.shared_interests.length > 3 ? (
                 <Badge
                   variant="outline"
-                  className="border-violet-200 bg-violet-50 text-violet-700"
+                  className="border-blue-200 bg-blue-50 text-blue-700"
                 >
                   +{person.shared_interests.length - 3}
                 </Badge>
@@ -178,7 +179,7 @@ function RecommendationCard({
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#2563EB] to-[#7C3AED]"
+                  className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-600"
                   style={{ width: `${matchPercent}%` }}
                 />
               </div>

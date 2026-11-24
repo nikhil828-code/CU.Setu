@@ -2,18 +2,19 @@
  * Deterministic avatar gradients + initials.
  *
  * The gradient is chosen by a small string hash of the username so it is
- * stable across renders and reloads — never random.
+ * stable across renders and reloads — never random. The palette mirrors the
+ * CU.Setu logo: deep navy blues, glowing oranges and a few supportive teals.
  */
 
 const GRADIENTS: [string, string][] = [
-  ['#2563EB', '#7C3AED'],
-  ['#1E40AF', '#3B82F6'],
-  ['#4F46E5', '#A78BFA'],
-  ['#0EA5E9', '#6366F1'],
-  ['#312E81', '#7C3AED'],
-  ['#1D4ED8', '#8B5CF6'],
-  ['#3730A3', '#60A5FA'],
-  ['#4338CA', '#93C5FD'],
+  ['#1D4ED8', '#F97316'], // navy -> orange (logo hero pairing)
+  ['#B45309', '#FBBF24'], // burnt orange -> amber
+  ['#0E7490', '#22D3EE'], // deep teal -> cyan
+  ['#0A1128', '#2563EB'], // midnight navy -> royal blue
+  ['#9A3412', '#FB923C'], // rust -> light orange
+  ['#155E75', '#F97316'], // teal -> orange
+  ['#1E3A8A', '#60A5FA'], // indigo navy -> sky
+  ['#7C2D12', '#F59E0B'], // dark umber -> amber
 ]
 
 function hashString(value: string): number {

@@ -1,5 +1,5 @@
 /**
- * CampusConnect shared API types — mirrors the Flask backend contract.
+ * CU.Setu shared API types — mirrors the Flask backend contract.
  */
 
 export interface UserSummary {
@@ -10,6 +10,10 @@ export interface UserSummary {
   bio: string
   skills: string[]
   interests: string[]
+  /** Public URL of the uploaded profile photo ("" = initials avatar). */
+  avatar_url: string
+  /** Public URL of the uploaded profile background ("" = gradient banner). */
+  cover_url: string
   connections_count: number
   posts_count: number
 }
@@ -21,13 +25,19 @@ export interface PostComment {
   author: UserSummary
   content: string
   created_at: string
+  likes: number
+  liked_by_me: boolean
 }
+
+export type PostMediaType = '' | 'image' | 'video'
 
 export interface Post {
   id: number
   author: UserSummary
   content: string
   created_at: string
+  media_url: string
+  media_type: PostMediaType
   likes: number
   liked_by_me: boolean
   is_mine: boolean
@@ -68,6 +78,7 @@ export type NotificationKind =
   | 'request_rejected'
   | 'post_liked'
   | 'post_commented'
+  | 'comment_liked'
 
 export interface NotificationItem {
   id: number

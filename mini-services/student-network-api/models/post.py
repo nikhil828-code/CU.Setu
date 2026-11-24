@@ -13,16 +13,24 @@ from typing import List
 
 
 class Post:
-    """A text post shared by a student."""
+    """A text post shared by a student — optionally with a photo or video.
 
-    __slots__ = ("id", "author", "content", "created_at")
+    media_url is the public URL of the uploaded file ("" when text-only)
+    and media_type is "" | "image" | "video".
+    """
+
+    __slots__ = ("id", "author", "content", "created_at",
+                 "media_url", "media_type")
 
     def __init__(self, post_id: int, author: str, content: str,
-                 created_at: str = "") -> None:
+                 created_at: str = "", media_url: str = "",
+                 media_type: str = "") -> None:
         self.id = post_id
         self.author = author
         self.content = content
         self.created_at = created_at
+        self.media_url = media_url
+        self.media_type = media_type
 
 
 class Comment:

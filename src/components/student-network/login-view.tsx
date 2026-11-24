@@ -71,12 +71,15 @@ export function LoginView() {
             type="button"
             onClick={() => goto('landing')}
             className="flex items-center gap-2.5"
-            aria-label="CampusConnect home"
+            aria-label="CU.Setu home"
           >
-            <BrandMark className="size-10" />
+            <BrandMark className="h-10 w-auto" />
+            <span className="text-xl font-semibold text-white">
+              CU.<span className="text-amber-400">Setu</span>
+            </span>
           </button>
           <h1 className="text-2xl font-semibold text-white">Welcome back</h1>
-          <p className="text-sm text-slate-400">Log in to CampusConnect</p>
+          <p className="text-sm text-slate-400">Log in to CU.Setu</p>
         </div>
 
         <Card className="border-white/10 shadow-xl shadow-black/30">
@@ -116,7 +119,7 @@ export function LoginView() {
                 <Button
                   type="submit"
                   disabled={submitting}
-                  className="w-full bg-[#101B3D] text-white hover:bg-[#182650]"
+                  className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
                 >
                   {submitting ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
                   {submitting ? 'Logging in…' : 'Log in'}
@@ -126,7 +129,7 @@ export function LoginView() {
 
             <div className="mt-5 rounded-lg border bg-muted/50 p-4">
               <div className="flex items-center gap-2 text-xs font-medium text-foreground">
-                <Sparkles className="size-3.5 text-[#2563EB]" aria-hidden="true" />
+                <Sparkles className="size-3.5 text-orange-600" aria-hidden="true" />
                 Try the demo
               </div>
               <p className="mt-1.5 text-sm text-muted-foreground">
@@ -149,10 +152,10 @@ export function LoginView() {
 
         <div className="mt-6 flex flex-col items-center gap-2 text-center text-sm">
           <p className="text-slate-400">
-            New to CampusConnect?{' '}
+            New to CU.Setu?{' '}
             <button
               type="button"
-              className="font-medium text-[#93C5FD] hover:underline"
+              className="font-medium text-amber-300 hover:underline"
               onClick={() => goto('register')}
             >
               Create an account

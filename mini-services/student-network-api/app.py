@@ -15,6 +15,7 @@ import config
 from network import network_state
 from routes.auth import auth_bp
 from routes.connections import connections_bp
+from routes.media import media_bp
 from routes.notifications import notifications_bp
 from routes.posts import posts_bp
 from routes.profile import profile_bp
@@ -29,10 +30,11 @@ def create_app() -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         JSON_SORT_KEYS=False,
+        MAX_CONTENT_LENGTH=config.MAX_MEDIA_BYTES,  # hard cap for uploads
     )
 
     blueprints = (auth_bp, profile_bp, connections_bp, posts_bp, search_bp,
-                  recommendations_bp, notifications_bp)
+                  recommendations_bp, notifications_bp, media_bp)
     for blueprint in blueprints:
         app.register_blueprint(blueprint)
 
@@ -53,6 +55,13 @@ def create_app() -> Flask:
     @app.errorhandler(405)
     def method_not_allowed(_error):
         return jsonify({"error": "Method not allowed."}), 405
+
+    @app.errorhandler(413)
+    def payload_too_large(_error):
+        mb = config.MAX_MEDIA_BYTES // (1024 * 1024)
+        return jsonify({
+            "error": f"That file is too large. Uploads are limited to {mb} MB."
+        }), 413
 
     @app.errorhandler(500)
     def server_error(_error):

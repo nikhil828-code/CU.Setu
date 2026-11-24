@@ -34,7 +34,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from '@/hooks/use-toast'
-import { ApiError, apiFetch } from '@/lib/api'
+import { ApiError, apiFetch, mediaSrc } from '@/lib/api'
 import { invalidateNetwork } from '@/lib/invalidate'
 import { timeAgo, fullDate } from '@/lib/time'
 import type { Post, PostComment } from '@/lib/types'
@@ -59,6 +59,100 @@ function updatePostLists(
         : data,
     )
   }
+}
+
+function updateComment(
+  post: Post,
+  commentId: number,
+  updater: (comment: PostComment) => PostComment,
+): Post {
+  return {
+    ...post,
+    comments: post.comments.map((comment) =>
+      comment.id === commentId ? updater(comment) : comment,
+    ),
+  }
+}
+
+/** One comment row with its own like button (optimistic toggle). */
+function CommentRow({ post, comment }: { post: Post; comment: PostComment }) {
+  const openProfile = useAppStore((s) => s.openProfile)
+  const queryClient = useQueryClient()
+
+  const commentLikeMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<{ liked: boolean; likes: number }>(`/comments/${comment.id}/like`, {
+        method: 'POST',
+      }),
+    onMutate: () => {
+      updatePostLists(queryClient, post.id, (p) =>
+        updateComment(p, comment.id, (c) => ({
+          ...c,
+          liked_by_me: !c.liked_by_me,
+          likes: c.likes + (c.liked_by_me ? -1 : 1),
+        })),
+      )
+    },
+    onSettled: () => {
+      invalidateNetwork(queryClient)
+    },
+  })
+
+  return (
+    <li className="flex gap-2.5">
+      <UserAvatar
+        username={comment.author.username}
+        fullName={comment.author.full_name}
+        avatarUrl={comment.author.avatar_url}
+        size="sm"
+        onClick={() => openProfile(comment.author.username)}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="rounded-lg bg-white px-3 py-2 shadow-sm ring-1 ring-black/[0.03]">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <button
+              type="button"
+              onClick={() => openProfile(comment.author.username)}
+              className="text-xs font-semibold hover:underline focus-visible:outline-none focus-visible:underline"
+            >
+              {comment.author.full_name}
+            </button>
+            <span
+              className="text-[11px] text-muted-foreground"
+              title={fullDate(comment.created_at)}
+            >
+              {timeAgo(comment.created_at)}
+            </span>
+          </div>
+          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">
+            {comment.content}
+          </p>
+        </div>
+        {/* Like-comment button */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => commentLikeMutation.mutate()}
+          disabled={commentLikeMutation.isPending}
+          aria-pressed={comment.liked_by_me}
+          className={cn(
+            'mt-0.5 h-6 gap-1 rounded-full px-2 text-[11px] text-muted-foreground hover:text-foreground',
+            comment.liked_by_me && 'text-rose-500 hover:text-rose-600',
+          )}
+        >
+          <Heart
+            className={cn('size-3', comment.liked_by_me && 'fill-rose-500')}
+            aria-hidden="true"
+          />
+          {comment.likes > 0 ? <span className="tabular-nums">{comment.likes}</span> : 'Like'}
+          <span className="sr-only">
+            {comment.liked_by_me ? 'You liked this comment' : 'Like this comment'}
+          </span>
+        </Button>
+      </div>
+    </li>
+  )
 }
 
 export function PostCard({ post }: { post: Post }) {
@@ -141,6 +235,7 @@ export function PostCard({ post }: { post: Post }) {
           <UserAvatar
             username={post.author.username}
             fullName={post.author.full_name}
+            avatarUrl={post.author.avatar_url}
             onClick={() => openProfile(post.author.username)}
           />
           <div className="min-w-0 flex-1">
@@ -195,6 +290,33 @@ export function PostCard({ post }: { post: Post }) {
           {post.content}
         </p>
 
+        {/* Attached photo / video */}
+        {post.media_type === 'image' && post.media_url ? (
+          <div className="mt-3 overflow-hidden rounded-xl border bg-muted/30">
+            { }
+            <img
+              src={mediaSrc(post.media_url)}
+              alt="Photo shared in this post"
+              loading="lazy"
+              className="max-h-[480px] w-full object-cover"
+            />
+          </div>
+        ) : null}
+        {post.media_type === 'video' && post.media_url ? (
+          <div className="mt-3 overflow-hidden rounded-xl border bg-black">
+            <video
+              controls
+              preload="metadata"
+              playsInline
+              className="max-h-[480px] w-full"
+              aria-label="Video shared in this post"
+            >
+              <source src={mediaSrc(post.media_url)} />
+              Your browser does not support embedded videos.
+            </video>
+          </div>
+        ) : null}
+
         <div className="mt-3 flex items-center gap-1 border-t pt-2">
           <Button
             variant="ghost"
@@ -244,34 +366,7 @@ export function PostCard({ post }: { post: Post }) {
             ) : (
               <ul className="space-y-3">
                 {post.comments.map((comment) => (
-                  <li key={comment.id} className="flex gap-2.5">
-                    <UserAvatar
-                      username={comment.author.username}
-                      fullName={comment.author.full_name}
-                      size="sm"
-                      onClick={() => openProfile(comment.author.username)}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-2">
-                        <button
-                          type="button"
-                          onClick={() => openProfile(comment.author.username)}
-                          className="text-xs font-semibold hover:underline focus-visible:outline-none focus-visible:underline"
-                        >
-                          {comment.author.full_name}
-                        </button>
-                        <span
-                          className="text-[11px] text-muted-foreground"
-                          title={fullDate(comment.created_at)}
-                        >
-                          {timeAgo(comment.created_at)}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">
-                        {comment.content}
-                      </p>
-                    </div>
-                  </li>
+                  <CommentRow key={comment.id} post={post} comment={comment} />
                 ))}
               </ul>
             )}
@@ -293,7 +388,7 @@ export function PostCard({ post }: { post: Post }) {
               />
               <Button
                 size="icon"
-                className="size-9 shrink-0 bg-[#101B3D] text-white hover:bg-[#182650]"
+                className="size-9 shrink-0 bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
                 onClick={submitComment}
                 disabled={commentDraft.trim() === '' || commentMutation.isPending}
                 aria-label="Post comment"
