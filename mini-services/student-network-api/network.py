@@ -400,25 +400,53 @@ class Network:
                                  "liked your post")
             return {"liked": liked, "likes": len(likers)}
 
-    def add_comment(self, post_id: int, acting_user: str, content: str) -> Comment:
+    def add_comment(self, post_id: int, acting_user: str, content: str,
+                    parent_id: int | None = None) -> Comment:
+        """Add a comment, or — when parent_id is given — a reply to an
+        existing comment on the same post (one nesting level)."""
         content = (content or "").strip()
         if not content:
             raise ApiError("Comment cannot be empty.", 400)
         if len(content) > 500:
             raise ApiError("Comments are limited to 500 characters.", 400)
+
+        parent: Comment | None = None
+        if parent_id is not None:
+            try:
+                parent_id = int(parent_id)
+            except (TypeError, ValueError):
+                raise ApiError("Invalid reply target.", 400)
+
         with self._lock:
             post = self.posts_by_id.get(post_id)
             if post is None:
                 raise ApiError("Post not found.", 404)
+            if parent_id is not None:
+                # Hash-table lookup: the parent comment in O(1).
+                parent = self.comments_by_id.get(parent_id)
+                if parent is None:
+                    raise ApiError("The comment you replied to no longer exists.", 404)
+                if parent.post_id != post_id:
+                    raise ApiError("You can only reply to comments on the same post.", 400)
+                if parent.parent_id is not None:
+                    # Keep threads one level deep — treat a reply-to-reply
+                    # as a reply to the parent thread's top-level comment.
+                    parent_id = parent.parent_id
+                    parent = self.comments_by_id[parent_id]
             created = now_iso()
-            comment = Comment(db.insert_comment(post_id, acting_user, content, created),
-                              post_id, acting_user, content, created)
+            comment = Comment(db.insert_comment(post_id, acting_user, content,
+                                                created, parent_id),
+                              post_id, acting_user, content, created, parent_id)
             self.comments.setdefault(post_id, []).append(comment)
             self.comments_by_id[comment.id] = comment
-            if post.author != acting_user:
+            actor_name = self.users[acting_user].full_name
+            if parent is not None:
+                if parent.author != acting_user:
+                    self._notify(parent.author, "comment_replied", acting_user,
+                                 f"{actor_name} replied to your comment")
+            elif post.author != acting_user:
                 self._notify(post.author, "post_commented", acting_user,
-                             f"{self.users[acting_user].full_name} "
-                             "commented on your post")
+                             f"{actor_name} commented on your post")
             return comment
 
     def toggle_comment_like(self, comment_id: int, acting_user: str) -> dict:
@@ -640,6 +668,16 @@ class Network:
 
     def serialize_post(self, post: Post, viewer: Optional[str]) -> dict:
         likers = self.likes.get(post.id, set())
+        # Group the flat chronological comment list into threads: top-level
+        # comments first, their replies nested one level under each parent.
+        flat = self.comments.get(post.id, [])
+        children: Dict[int, List[Comment]] = {}
+        top_level: List[Comment] = []
+        for comment in flat:
+            if comment.parent_id is None:
+                top_level.append(comment)
+            else:
+                children.setdefault(comment.parent_id, []).append(comment)
         return {
             "id": post.id,
             "author": self.user_summary(post.author),
@@ -649,13 +687,16 @@ class Network:
             "media_type": post.media_type,
             "likes": len(likers),
             "liked_by_me": bool(viewer and viewer in likers),
-            "comments": [self.serialize_comment(comment, viewer)
-                         for comment in self.comments.get(post.id, [])],
+            "comments": [self.serialize_comment(comment, viewer,
+                                                replies=children.get(comment.id, []))
+                         for comment in top_level],
             "is_mine": bool(viewer and post.author == viewer),
         }
 
-    def serialize_comment(self, comment: Comment, viewer: Optional[str]) -> dict:
-        """One comment with its like state (O(1) hash-table lookup)."""
+    def serialize_comment(self, comment: Comment, viewer: Optional[str],
+                          replies: Optional[List[Comment]] = None) -> dict:
+        """One comment with its like state (O(1) hash-table lookup) and,
+        when supplied, its direct replies nested beneath it."""
         likers = self.comment_likes.get(comment.id, set())
         return {
             "id": comment.id,
@@ -664,6 +705,9 @@ class Network:
             "created_at": comment.created_at,
             "likes": len(likers),
             "liked_by_me": bool(viewer and viewer in likers),
+            "parent_id": comment.parent_id,
+            "replies": [self.serialize_comment(reply, viewer)
+                        for reply in (replies or [])],
         }
 
     def _serialize_note(self, note: Notification) -> dict:

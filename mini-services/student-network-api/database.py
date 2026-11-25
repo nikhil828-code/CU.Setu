@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS comments (
     post_id    INTEGER NOT NULL,
     author     TEXT NOT NULL,
     content    TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    parent_id  INTEGER                              -- NULL = top-level comment
 );
 
 -- Comment likes: same "one like per user" rule as post likes.
@@ -116,6 +117,7 @@ _MIGRATIONS = (
     "ALTER TABLE users ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE posts ADD COLUMN media_url TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE posts ADD COLUMN media_type TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE comments ADD COLUMN parent_id INTEGER",
 )
 
 
@@ -417,14 +419,14 @@ def fetch_likes() -> Dict[int, Set[str]]:
 # Comments + comment likes
 # --------------------------------------------------------------------------- #
 def insert_comment(post_id: int, author: str, content: str,
-                   created_at: str) -> int:
+                   created_at: str, parent_id: int | None = None) -> int:
     conn = _connect()
     try:
         with conn:
             cursor = conn.execute(
-                "INSERT INTO comments (post_id, author, content, created_at)"
-                " VALUES (?,?,?,?)",
-                (post_id, author, content, created_at),
+                "INSERT INTO comments (post_id, author, content, created_at,"
+                " parent_id) VALUES (?,?,?,?,?)",
+                (post_id, author, content, created_at, parent_id),
             )
             comment_id = cursor.lastrowid
     finally:
@@ -441,9 +443,13 @@ def fetch_comments() -> Dict[int, List[Comment]]:
         conn.close()
     grouped: Dict[int, List[Comment]] = {}
     for row in rows:
+        # Older database files pre-date the parent_id column — treat those
+        # rows as top-level comments.
+        columns = set(row.keys())
+        parent_id = row["parent_id"] if "parent_id" in columns else None
         grouped.setdefault(row["post_id"], []).append(
             Comment(row["id"], row["post_id"], row["author"],
-                    row["content"], row["created_at"])
+                    row["content"], row["created_at"], parent_id)
         )
     return grouped
 

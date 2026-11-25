@@ -44,6 +44,11 @@ const KIND_META: Record<
     label: 'New comment',
   },
   comment_liked: { icon: Heart, className: 'bg-amber-100 text-amber-600', label: 'Comment liked' },
+  comment_replied: {
+    icon: MessageCircle,
+    className: 'bg-violet-100 text-violet-600',
+    label: 'Reply to comment',
+  },
 }
 
 function NotificationSkeleton() {

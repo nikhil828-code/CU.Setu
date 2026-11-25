@@ -64,7 +64,7 @@ export function LoginView() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0A1128] px-4 py-10">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#0A1631] via-[#0F1F46] to-[#0F1F46] px-4 py-10">
       <main className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <button

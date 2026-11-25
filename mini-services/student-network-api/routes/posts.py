@@ -59,7 +59,8 @@ def toggle_like(post_id):
 def add_comment(post_id):
     data = body()
     comment = network_state.add_comment(post_id, current_username(),
-                                        data.get("content", ""))
+                                        data.get("content", ""),
+                                        data.get("parent_id"))
     return jsonify({"comment":
                     network_state.serialize_comment(comment,
                                                     current_username())}), 201

@@ -34,24 +34,32 @@ class Post:
 
 
 class Comment:
-    """A comment on a post (chronological order per post)."""
+    """A comment on a post (chronological order per post).
 
-    __slots__ = ("id", "post_id", "author", "content", "created_at")
+    parent_id is None for top-level comments and the id of the comment
+    being replied to otherwise — replies give a comment thread one level
+    of nesting (a reply never has children of its own).
+    """
+
+    __slots__ = ("id", "post_id", "author", "content", "created_at",
+                 "parent_id")
 
     def __init__(self, comment_id: int, post_id: int, author: str,
-                 content: str, created_at: str = "") -> None:
+                 content: str, created_at: str = "",
+                 parent_id: int | None = None) -> None:
         self.id = comment_id
         self.post_id = post_id
         self.author = author
         self.content = content
         self.created_at = created_at
+        self.parent_id = parent_id
 
 
 class Notification:
     """A notification delivered to one student.
 
     kinds: request_received | request_accepted | request_rejected |
-           post_liked | post_commented
+           post_liked | post_commented | comment_liked | comment_replied
     New notifications are ENQUEUED (FIFO); the notification page reads them
     newest-first.
     """

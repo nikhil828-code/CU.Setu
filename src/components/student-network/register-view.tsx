@@ -130,7 +130,7 @@ export function RegisterView() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#0A1128]">
+    <div className="flex min-h-screen bg-[#0F1F46]">
       <main className="flex w-full flex-col items-center justify-center px-4 py-10 lg:pl-16">
         <div className="w-full max-w-xl">
           <div className="mb-8 flex flex-col items-start gap-3">
@@ -336,7 +336,7 @@ export function RegisterView() {
           priority
           className="object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0A1128] via-[#0A1128]/55 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0A1631] via-[#0F1F46]/55 to-transparent" />
         <div className="absolute bottom-10 left-8 right-8">
           <BrandMark className="h-12 w-auto" />
           <p className="mt-3 text-lg font-medium leading-relaxed text-white">

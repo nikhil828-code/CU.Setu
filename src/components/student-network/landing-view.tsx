@@ -58,8 +58,8 @@ export function LandingView() {
   })
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#0A1128] text-slate-200">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0A1128]/90 backdrop-blur">
+    <div className="flex min-h-screen flex-col bg-[#0F1F46] text-slate-200">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0A1631]/90 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
           <button
             type="button"
@@ -105,7 +105,7 @@ export function LandingView() {
           />
           {/* Bottom-dark -> top-transparent: the blue sky stays visible. */}
           <div
-            className="absolute inset-0 bg-gradient-to-t from-[#050B1F]/95 via-[#0A1128]/40 to-[#0A1128]/10"
+            className="absolute inset-0 bg-gradient-to-t from-[#050B1F]/95 via-[#0A1631]/40 to-[#0A1631]/10"
             aria-hidden="true"
           />
           {/* Extra darkness hugging the name block on the left. */}
@@ -148,7 +148,7 @@ export function LandingView() {
                   Log in
                 </Button>
               </div>
-              <dl className="mt-10 grid max-w-lg grid-cols-3 gap-3 rounded-2xl border border-white/10 bg-[#0A1128]/60 p-4 backdrop-blur-sm sm:gap-4">
+              <dl className="mt-10 grid max-w-lg grid-cols-3 gap-3 rounded-2xl border border-white/10 bg-[#0A1631]/60 p-4 backdrop-blur-sm sm:gap-4">
                 <div>
                   <dt className="sr-only">Students</dt>
                   <dd className="text-2xl font-bold text-white sm:text-3xl">
@@ -176,7 +176,7 @@ export function LandingView() {
         </section>
 
         {/* Features */}
-        <section className="border-t border-white/10 bg-[#0D1530]">
+        <section className="border-t border-white/10 bg-[#16264E]">
           <div className="mx-auto w-full max-w-6xl px-4 py-14 sm:px-6">
             <h2 className="text-2xl font-bold tracking-tight text-white">
               Built like a system, not a feed
@@ -221,7 +221,7 @@ export function LandingView() {
         </section>
 
         {/* Live stats */}
-        <section className="border-t border-white/10 bg-[#0D1530]">
+        <section className="border-t border-white/10 bg-[#16264E]">
           <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-3 px-4 py-8 sm:grid-cols-3 sm:px-6">
             <StatChip tone="dark" label="Students" value={stats?.students ?? '—'} />
             <StatChip tone="dark" label="Connections" value={stats?.connections ?? '—'} />
@@ -230,7 +230,7 @@ export function LandingView() {
         </section>
       </main>
 
-      <footer className="mt-auto border-t border-white/10 bg-[#0A1128]">
+      <footer className="mt-auto border-t border-white/10 bg-[#0A1631]">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-8 sm:px-6 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
             <BrandMark className="h-8 w-auto" />

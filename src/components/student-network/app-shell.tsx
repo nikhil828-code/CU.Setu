@@ -151,11 +151,25 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#F4F6FB]">
-      {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-white/10 bg-[#0A1128] lg:flex">
-        <div className="flex items-center gap-2.5 px-5 py-5">
-          <BrandMark className="h-9 w-auto" />
-          <span className="text-lg font-semibold text-white">CU.Setu</span>
+      {/* Desktop sidebar — navy lifted one shade lighter than before */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-white/10 bg-[#0F1F46] lg:flex">
+        {/* Brand band: a dimmer, lower shade hugs the logo so the glowing
+            mark stands out against it. */}
+        <div className="relative flex items-center gap-2.5 overflow-hidden border-b border-white/10 px-5 py-5">
+          <span
+            aria-hidden="true"
+            className="absolute inset-0 bg-[#0A1631]"
+          />
+          <span
+            aria-hidden="true"
+            className="absolute -left-8 top-1/2 size-28 -translate-y-1/2 rounded-full bg-amber-500/15 blur-2xl"
+          />
+          <span
+            aria-hidden="true"
+            className="absolute -right-10 top-0 size-24 translate-y-1/2 rounded-full bg-blue-500/10 blur-2xl"
+          />
+          <BrandMark className="relative h-9 w-auto" />
+          <span className="relative text-lg font-semibold text-white">CU.Setu</span>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2" aria-label="Primary">
           {navItems.map((item) => {
@@ -209,16 +223,20 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Mobile top bar */}
-      <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-white/10 bg-[#0A1128] px-4 lg:hidden">
+      {/* Mobile top bar — same lifted navy, dimmer band behind the logo */}
+      <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-white/10 bg-[#0F1F46] px-4 lg:hidden">
         <button
           type="button"
           onClick={() => goto('feed')}
-          className="flex items-center gap-2"
+          className="relative flex items-center gap-2"
           aria-label="CU.Setu home"
         >
-          <BrandMark className="h-7 w-auto" />
-          <span className="text-base font-semibold text-white">CU.Setu</span>
+          <span
+            aria-hidden="true"
+            className="absolute -left-4 -top-4 size-24 rounded-full bg-[#0A1631] blur-lg"
+          />
+          <BrandMark className="relative h-7 w-auto" />
+          <span className="relative text-base font-semibold text-white">CU.Setu</span>
         </button>
         <div className="flex items-center gap-1">
           <button

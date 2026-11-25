@@ -61,6 +61,16 @@ function updatePostLists(
   }
 }
 
+/** Apply a transform to every comment in a (possibly nested) thread tree. */
+function mapCommentTree(
+  comments: PostComment[],
+  fn: (comment: PostComment) => PostComment,
+): PostComment[] {
+  return comments.map((comment) =>
+    fn({ ...comment, replies: mapCommentTree(comment.replies ?? [], fn) }),
+  )
+}
+
 function updateComment(
   post: Post,
   commentId: number,
@@ -68,16 +78,54 @@ function updateComment(
 ): Post {
   return {
     ...post,
-    comments: post.comments.map((comment) =>
+    comments: mapCommentTree(post.comments, (comment) =>
       comment.id === commentId ? updater(comment) : comment,
     ),
   }
 }
 
-/** One comment row with its own like button (optimistic toggle). */
-function CommentRow({ post, comment }: { post: Post; comment: PostComment }) {
+/** Place a newly created comment into the tree — top-level or under its
+ *  parent comment so replies appear threaded without a refetch. */
+function insertComment(post: Post, comment: PostComment): Post {
+  if (comment.parent_id == null) {
+    return { ...post, comments: [...post.comments, comment] }
+  }
+  return {
+    ...post,
+    comments: mapCommentTree(post.comments, (existing) =>
+      existing.id === comment.parent_id
+        ? { ...existing, replies: [...existing.replies, comment] }
+        : existing,
+    ),
+  }
+}
+
+/** Total comments in a thread tree — replies included. */
+function countComments(comments: PostComment[]): number {
+  return comments.reduce(
+    (total, comment) => total + 1 + countComments(comment.replies ?? []),
+    0,
+  )
+}
+
+/** One comment row with like + reply buttons and its nested replies. */
+function CommentRow({
+  post,
+  comment,
+  onSubmitReply,
+  pendingReplyId,
+  isReply = false,
+}: {
+  post: Post
+  comment: PostComment
+  onSubmitReply: (content: string, parentId: number) => void
+  pendingReplyId: number | null
+  isReply?: boolean
+}) {
   const openProfile = useAppStore((s) => s.openProfile)
   const queryClient = useQueryClient()
+  const [replyOpen, setReplyOpen] = useState(false)
+  const [replyDraft, setReplyDraft] = useState('')
 
   const commentLikeMutation = useMutation({
     mutationFn: () =>
@@ -97,6 +145,16 @@ function CommentRow({ post, comment }: { post: Post; comment: PostComment }) {
       invalidateNetwork(queryClient)
     },
   })
+
+  const replyPending = pendingReplyId === comment.id
+
+  const submitReply = () => {
+    const content = replyDraft.trim()
+    if (content === '' || replyPending) return
+    onSubmitReply(content, comment.id)
+    setReplyDraft('')
+    setReplyOpen(false)
+  }
 
   return (
     <li className="flex gap-2.5">
@@ -128,28 +186,96 @@ function CommentRow({ post, comment }: { post: Post; comment: PostComment }) {
             {comment.content}
           </p>
         </div>
-        {/* Like-comment button */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => commentLikeMutation.mutate()}
-          disabled={commentLikeMutation.isPending}
-          aria-pressed={comment.liked_by_me}
-          className={cn(
-            'mt-0.5 h-6 gap-1 rounded-full px-2 text-[11px] text-muted-foreground hover:text-foreground',
-            comment.liked_by_me && 'text-rose-500 hover:text-rose-600',
-          )}
-        >
-          <Heart
-            className={cn('size-3', comment.liked_by_me && 'fill-rose-500')}
-            aria-hidden="true"
-          />
-          {comment.likes > 0 ? <span className="tabular-nums">{comment.likes}</span> : 'Like'}
-          <span className="sr-only">
-            {comment.liked_by_me ? 'You liked this comment' : 'Like this comment'}
-          </span>
-        </Button>
+        {/* Like-comment + reply buttons */}
+        <div className="mt-0.5 flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => commentLikeMutation.mutate()}
+            disabled={commentLikeMutation.isPending}
+            aria-pressed={comment.liked_by_me}
+            className={cn(
+              'h-6 gap-1 rounded-full px-2 text-[11px] text-muted-foreground hover:text-foreground',
+              comment.liked_by_me && 'text-rose-500 hover:text-rose-600',
+            )}
+          >
+            <Heart
+              className={cn('size-3', comment.liked_by_me && 'fill-rose-500')}
+              aria-hidden="true"
+            />
+            {comment.likes > 0 ? <span className="tabular-nums">{comment.likes}</span> : 'Like'}
+            <span className="sr-only">
+              {comment.liked_by_me ? 'You liked this comment' : 'Like this comment'}
+            </span>
+          </Button>
+          {!isReply ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setReplyOpen((open) => !open)}
+              aria-expanded={replyOpen}
+              className="h-6 gap-1 rounded-full px-2 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <MessageCircle className="size-3" aria-hidden="true" />
+              Reply
+              <span className="sr-only">
+                {replyOpen ? `Cancel reply to ${comment.author.full_name}` : `Reply to ${comment.author.full_name}`}
+              </span>
+            </Button>
+          ) : null}
+        </div>
+
+        {/* Inline reply box */}
+        {replyOpen ? (
+          <div className="mt-1.5 flex items-center gap-2">
+            <Input
+              value={replyDraft}
+              onChange={(e) => setReplyDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  submitReply()
+                }
+              }}
+              placeholder={`Reply to ${comment.author.full_name}…`}
+              aria-label={`Reply to ${comment.author.full_name}'s comment`}
+              className="h-8 bg-white text-sm"
+              maxLength={500}
+              autoFocus
+            />
+            <Button
+              size="icon"
+              className="size-8 shrink-0 bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
+              onClick={() => submitReply()}
+              disabled={replyDraft.trim() === '' || replyPending}
+              aria-label="Post reply"
+            >
+              {replyPending ? (
+                <Loader2 className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Send className="size-3.5" aria-hidden="true" />
+              )}
+            </Button>
+          </div>
+        ) : null}
+
+        {/* Replies threaded under this comment (one nesting level) */}
+        {comment.replies.length > 0 ? (
+          <ul className="mt-2 space-y-2.5 border-l-2 border-border/70 pl-3">
+            {comment.replies.map((reply) => (
+              <CommentRow
+                key={reply.id}
+                post={post}
+                comment={reply}
+                isReply
+                onSubmitReply={onSubmitReply}
+                pendingReplyId={pendingReplyId}
+              />
+            ))}
+          </ul>
+        ) : null}
       </div>
     </li>
   )
@@ -181,17 +307,17 @@ export function PostCard({ post }: { post: Post }) {
   })
 
   const commentMutation = useMutation({
-    mutationFn: (content: string) =>
+    mutationFn: ({ content, parentId }: { content: string; parentId: number | null }) =>
       apiFetch<{ comment: PostComment }>(`/posts/${post.id}/comments`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({
+          content,
+          ...(parentId != null ? { parent_id: parentId } : {}),
+        }),
       }),
     onSuccess: ({ comment }) => {
       setCommentDraft('')
-      updatePostLists(queryClient, post.id, (p) => ({
-        ...p,
-        comments: [...p.comments, comment],
-      }))
+      updatePostLists(queryClient, post.id, (p) => insertComment(p, comment))
       queryClient.invalidateQueries({ queryKey: ['feed'] })
       queryClient.invalidateQueries({ queryKey: ['user-posts'] })
     },
@@ -222,11 +348,16 @@ export function PostCard({ post }: { post: Post }) {
     },
   })
 
-  const submitComment = () => {
-    const content = commentDraft.trim()
+  const submitComment = (parentId: number | null = null, contentOverride?: string) => {
+    const content = (contentOverride ?? commentDraft).trim()
     if (content === '' || commentMutation.isPending) return
-    commentMutation.mutate(content)
+    commentMutation.mutate({ content, parentId })
   }
+
+  // Id of the comment whose reply is currently being sent (for the spinner).
+  const pendingReplyId = commentMutation.isPending
+    ? (commentMutation.variables?.parentId ?? null)
+    : null
 
   return (
     <Card className="shadow-sm">
@@ -350,7 +481,7 @@ export function PostCard({ post }: { post: Post }) {
             className="gap-1.5 rounded-full px-3 text-muted-foreground hover:text-foreground"
           >
             <MessageCircle className="size-4" aria-hidden="true" />
-            <span className="tabular-nums">{post.comments.length}</span>
+            <span className="tabular-nums">{countComments(post.comments)}</span>
             <span className="sr-only">
               {showComments ? 'Hide comments' : 'Show comments'}
             </span>
@@ -366,7 +497,13 @@ export function PostCard({ post }: { post: Post }) {
             ) : (
               <ul className="space-y-3">
                 {post.comments.map((comment) => (
-                  <CommentRow key={comment.id} post={post} comment={comment} />
+                  <CommentRow
+                    key={comment.id}
+                    post={post}
+                    comment={comment}
+                    onSubmitReply={(content, parentId) => submitComment(parentId, content)}
+                    pendingReplyId={pendingReplyId}
+                  />
                 ))}
               </ul>
             )}
@@ -389,7 +526,7 @@ export function PostCard({ post }: { post: Post }) {
               <Button
                 size="icon"
                 className="size-9 shrink-0 bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
-                onClick={submitComment}
+                onClick={() => submitComment()}
                 disabled={commentDraft.trim() === '' || commentMutation.isPending}
                 aria-label="Post comment"
               >

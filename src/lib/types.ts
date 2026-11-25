@@ -27,6 +27,10 @@ export interface PostComment {
   created_at: string
   likes: number
   liked_by_me: boolean
+  /** Id of the comment this replies to — null for top-level comments. */
+  parent_id: number | null
+  /** Direct replies nested under this comment (one thread level). */
+  replies: PostComment[]
 }
 
 export type PostMediaType = '' | 'image' | 'video'
@@ -79,6 +83,7 @@ export type NotificationKind =
   | 'post_liked'
   | 'post_commented'
   | 'comment_liked'
+  | 'comment_replied'
 
 export interface NotificationItem {
   id: number

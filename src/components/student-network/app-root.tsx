@@ -23,7 +23,7 @@ import { useAppStore } from '@/store/app-store'
 
 function SplashScreen() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#0A1128]">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#0F1F46]">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
