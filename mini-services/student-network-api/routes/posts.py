@@ -26,8 +26,10 @@ def create_post():
     username = current_username()
     media_url, media_type = "", ""
 
-    if request.files:
-        # Multipart upload: text fields arrive in request.form.
+    content_type = (request.content_type or "").lower()
+    if content_type.startswith("multipart/form-data"):
+        # Multipart upload (the browser composer always posts FormData, with
+        # or without a file): text fields arrive in request.form.
         content = request.form.get("content", "")
         upload = request.files.get("media")
         if upload is not None:
