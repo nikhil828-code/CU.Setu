@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/hooks/use-toast'
-import { apiUpload } from '@/lib/api'
+import { ApiError, apiUpload } from '@/lib/api'
 import { invalidateNetwork } from '@/lib/invalidate'
 import type { Post } from '@/lib/types'
 import { useAppStore } from '@/store/app-store'
@@ -39,11 +39,24 @@ export function PostComposer() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const createMutation = useMutation({
-    mutationFn: () => {
-      const form = new FormData()
-      form.append('content', content.trim())
-      if (picked) form.append('media', picked.file)
-      return apiUpload<{ post: Post }>('/posts', form)
+    // One automatic retry when the gateway/backend is momentarily unreachable
+    // (e.g. right after a service restart) — mirrors LinkedIn's resilient UX.
+    mutationFn: async () => {
+      const submit = () => {
+        const form = new FormData()
+        form.append('content', content.trim())
+        if (picked) form.append('media', picked.file)
+        return apiUpload<{ post: Post }>('/posts', form)
+      }
+      try {
+        return await submit()
+      } catch (error) {
+        const isNetworkDrop =
+          error instanceof ApiError && (error.status === 0 || error.status >= 500)
+        if (!isNetworkDrop) throw error
+        await new Promise((resolve) => setTimeout(resolve, 700))
+        return await submit()
+      }
     },
     onSuccess: () => {
       invalidateNetwork(queryClient)
@@ -52,10 +65,12 @@ export function PostComposer() {
       toast({ title: 'Posted', description: 'Your update is live on the feed.' })
     },
     onError: (error) => {
+      const networkDown = error instanceof ApiError && error.status === 0
       toast({
-        title: 'Could not publish',
-        description:
-          error instanceof Error && error.message
+        title: networkDown ? 'CU.Setu server is not reachable' : 'Could not publish',
+        description: networkDown
+          ? 'The post service seems to be restarting. Please try again in a few seconds.'
+          : error instanceof Error && error.message
             ? error.message
             : 'Something went wrong. Please try again.',
         variant: 'destructive',

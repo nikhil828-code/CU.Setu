@@ -3,17 +3,21 @@
 import { useEffect, useRef } from 'react'
 
 /**
- * CursorGlow — a playful multi-layer cursor experience.
+ * CursorGlow — a playful golden cursor experience.
  *
  * Layers:
  *   1. Spark trail (canvas) — tiny amber / orange embers scatter behind the
  *      pointer while it moves, drift upward and fade out.
  *   2. Click burst (canvas) — a ring of sparks explodes from the pointer on
  *      every mousedown.
- *   3. Soft halo that brightens while the cursor is moving.
- *   4. Easing ring (lerp follow) that swells over interactive elements
- *      (links, buttons, inputs) and squeezes while pressed.
- *   5. Instant glowing dot that tracks the pointer 1:1.
+ *   3. Soft halo that brightens while the cursor is moving and swells a
+ *      little over interactive elements.
+ *   4. Grow effect — whatever interactive element the cursor rests on
+ *      (link, button, menu item…) gently scales up, so the thing under the
+ *      pointer always feels lifted.
+ *
+ * The former easing ring and glowing dot were removed — the page's own
+ * controls plus the halo now carry the whole effect.
  *
  * Everything is driven by one requestAnimationFrame loop with pure
  * transform / canvas writes — no React re-renders while the cursor moves.
@@ -35,30 +39,35 @@ interface Spark {
 
 const SPARK_COLORS = ['#FDE68A', '#FBBF24', '#F59E0B', '#F97316', '#FFFBEB']
 const MAX_SPARKS = 220
+/** Elements that get the golden halo while hovered. */
 const HOVER_SELECTOR =
   'a, button, [role="button"], input, textarea, select, label, summary, [data-cursor="hover"]'
+/** Elements that physically grow a little under the cursor. */
+const GROW_SELECTOR =
+  'a, button, [role="button"], [role="menuitem"], [role="tab"], select, summary, [data-cursor="hover"]'
+const GROW_SCALE = '1.06'
+const GROW_TRANSITION = 'scale 170ms cubic-bezier(0.22, 1, 0.36, 1)'
 
 export function CursorGlow() {
-  const dotRef = useRef<HTMLDivElement>(null)
-  const ringRef = useRef<HTMLDivElement>(null)
   const haloRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    // Touch / coarse-pointer devices get no cursor experience at all —
+    // the visual layer is hidden by CSS and the effects are skipped here.
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return
 
-    const dot = dotRef.current
-    const ring = ringRef.current
     const halo = haloRef.current
     const canvas = canvasRef.current
-    if (!dot || !ring || !halo || !canvas) return
+    if (!halo || !canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    let dotX = -100
-    let dotY = -100
-    let ringX = -100
-    let ringY = -100
+    let x = -100
+    let y = -100
+    let haloX = -100
+    let haloY = -100
     let lastSparkX = -100
     let lastSparkY = -100
     let shown = false
@@ -67,13 +76,42 @@ export function CursorGlow() {
     let raf = 0
     let lastFrame = performance.now()
 
-    // Ring states eased inside the animation loop.
-    let ringScale = 1
-    let targetScale = 1
+    // Halo states eased inside the animation loop.
+    let haloScale = 1
+    let haloTargetScale = 1
     let pressed = false
     let hovering = false
 
     const sparks: Spark[] = []
+
+    // ------------------------------------------------------------------ //
+    // Grow effect — lift the element the cursor rests on.
+    // ------------------------------------------------------------------ //
+    let growEl: HTMLElement | null = null
+
+    const clearGrow = () => {
+      if (growEl) {
+        growEl.style.scale = ''
+        growEl.style.transition = ''
+        growEl = null
+      }
+    }
+
+    const applyGrow = (el: Element | null) => {
+      if (el === growEl) return
+      clearGrow()
+      // Only grow real, enabled controls; skip anything mid-interaction.
+      if (
+        el instanceof HTMLElement &&
+        !el.closest('[aria-disabled="true"]') &&
+        !el.hasAttribute('disabled') &&
+        !el.closest('[data-cursor="no-grow"]')
+      ) {
+        el.style.transition = GROW_TRANSITION
+        el.style.scale = GROW_SCALE
+        growEl = el
+      }
+    }
 
     // ------------------------------------------------------------------ //
     // Canvas sizing (device-pixel-ratio aware)
@@ -158,75 +196,65 @@ export function CursorGlow() {
     // Pointer events
     // ------------------------------------------------------------------ //
     const onMove = (event: MouseEvent) => {
-      const x = event.clientX
-      const y = event.clientY
+      const px = event.clientX
+      const py = event.clientY
       if (!shown) {
         shown = true
-        ringX = x
-        ringY = y
-        dot.style.opacity = '1'
-        ring.style.opacity = '1'
+        haloX = px
+        haloY = py
         halo.style.opacity = '1'
       }
 
       // Spawn trail sparks only when the pointer actually travelled.
-      const dx = x - lastSparkX
-      const dy = y - lastSparkY
+      const dx = px - lastSparkX
+      const dy = py - lastSparkY
       if (dx * dx + dy * dy > 36) {
-        trailSparks(x, y, dx, dy)
-        lastSparkX = x
-        lastSparkY = y
+        trailSparks(px, py, dx, dy)
+        lastSparkX = px
+        lastSparkY = py
       }
 
-      dotX = x
-      dotY = y
+      x = px
+      y = py
       moving = true
-      dot.style.transform = `translate3d(${dotX}px, ${dotY}px, 0) translate(-50%, -50%)`
       if (moveTimer) clearTimeout(moveTimer)
       moveTimer = setTimeout(() => {
         moving = false
       }, 180)
 
-      // Swell over anything interactive.
       const target = event.target as Element | null
       hovering = Boolean(target?.closest?.(HOVER_SELECTOR))
-      targetScale = hovering ? 1.6 : pressed ? 0.72 : 1
-      ring.style.borderColor = hovering
-        ? 'rgba(251, 191, 36, 0.95)'
-        : 'rgba(251, 146, 60, 0.7)'
+      haloTargetScale = pressed ? 0.85 : hovering ? 1.18 : 1
+      applyGrow(target?.closest?.(GROW_SELECTOR) ?? null)
     }
 
     const onDown = (event: MouseEvent) => {
       pressed = true
-      targetScale = hovering ? 1.1 : 0.72
+      haloTargetScale = 0.85
       burstSparks(event.clientX, event.clientY)
     }
     const onUp = () => {
       pressed = false
-      targetScale = hovering ? 1.6 : 1
+      haloTargetScale = hovering ? 1.18 : 1
     }
     const onLeave = () => {
-      dot.style.opacity = '0'
-      ring.style.opacity = '0'
       halo.style.opacity = '0'
       shown = false
       sparks.length = 0
+      clearGrow()
     }
 
     const tick = (now: number) => {
       const dtSeconds = Math.min((now - lastFrame) / 1000, 0.05)
       lastFrame = now
 
-      // The ring eases towards the dot position — classic lerp follow.
-      ringX += (dotX - ringX) * 0.18
-      ringY += (dotY - ringY) * 0.18
-      ringScale += (targetScale - ringScale) * 0.22
-      ring.style.transform =
-        `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%) ` +
-        `scale(${ringScale.toFixed(3)})`
+      // The halo glides after the pointer — a soft trailing glow.
+      haloX += (x - haloX) * 0.3
+      haloY += (y - haloY) * 0.3
+      haloScale += (haloTargetScale - haloScale) * 0.18
       halo.style.transform =
-        `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%)` +
-        (hovering ? ' scale(1.25)' : '')
+        `translate3d(${haloX}px, ${haloY}px, 0) translate(-50%, -50%) ` +
+        `scale(${haloScale.toFixed(3)})`
       halo.style.opacity = moving ? '1' : '0.45'
 
       drawSparks(dtSeconds)
@@ -247,6 +275,7 @@ export function CursorGlow() {
       document.documentElement.removeEventListener('mouseleave', onLeave)
       if (moveTimer) clearTimeout(moveTimer)
       cancelAnimationFrame(raf)
+      clearGrow()
     }
   }, [])
 
@@ -261,31 +290,11 @@ export function CursorGlow() {
         className="absolute inset-0 size-full"
         style={{ willChange: 'contents' }}
       />
-      {/* Soft halo that brightens while the cursor is moving */}
+      {/* Soft golden halo that brightens while the cursor is moving */}
       <div
         ref={haloRef}
         className="absolute left-0 top-0 size-40 rounded-full bg-amber-400/10 blur-2xl transition-opacity duration-300"
         style={{ opacity: 0, willChange: 'transform, opacity' }}
-      />
-      {/* Easing ring */}
-      <div
-        ref={ringRef}
-        className="absolute left-0 top-0 size-9 rounded-full border-2 border-amber-400/70 transition-[border-color] duration-150"
-        style={{
-          opacity: 0,
-          willChange: 'transform',
-          boxShadow: '0 0 14px rgba(251, 146, 60, 0.35)',
-        }}
-      />
-      {/* Instant dot */}
-      <div
-        ref={dotRef}
-        className="absolute left-0 top-0 size-1.5 rounded-full bg-amber-400"
-        style={{
-          opacity: 0,
-          willChange: 'transform',
-          boxShadow: '0 0 10px 2px rgba(251, 146, 60, 0.8)',
-        }}
       />
     </div>
   )

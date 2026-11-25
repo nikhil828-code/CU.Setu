@@ -1,7 +1,7 @@
 'use client'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Clock, MessageSquare, MoreHorizontal, UserMinus, UserPlus, X } from 'lucide-react'
+import { Check, Clock, MoreHorizontal, UserMinus, UserPlus, X } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -169,13 +169,10 @@ export function ConnectButton({
     )
   }
 
-  // connected
+  // connected — only the options menu (remove connection) is offered;
+  // the message placeholder was removed on purpose.
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <Button variant="outline" size={size} disabled className={className}>
-        <MessageSquare aria-hidden="true" />
-        Message
-      </Button>
       <AlertDialog open={removeOpen} onOpenChange={setRemoveOpen}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

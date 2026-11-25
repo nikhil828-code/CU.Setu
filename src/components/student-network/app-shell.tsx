@@ -224,7 +224,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile top bar — same lifted navy, dimmer band behind the logo */}
-      <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-white/10 bg-[#0F1F46] px-4 lg:hidden">
+      <header className="sticky top-0 z-40 flex h-14 items-center justify-between overflow-hidden border-b border-white/10 bg-[#0F1F46] px-4 lg:hidden">
         <button
           type="button"
           onClick={() => goto('feed')}
