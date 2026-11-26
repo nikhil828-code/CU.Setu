@@ -1,4 +1,3 @@
-![Repository Banner](CU.setu_ Connecting Minds, Building Bridges.png)
 
 # 🌐 CU.Setu – Bridging Students, Connecting Possibilities.
 
