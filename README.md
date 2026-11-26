@@ -1,3 +1,5 @@
+![Repository Banner](banner.png)
+
 # 🌐 CU.Setu – Bridging Students, Connecting Possibilities.
 
 ### A University Student Networking & Collaboration Platform
