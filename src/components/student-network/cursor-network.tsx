@@ -1,34 +1,28 @@
 'use client'
 
 /**
- * NetworkCursor — CU.Setu's advanced "digital network" cursor.
+ * NetworkCursor — CU.Setu's refined, minimal cursor.
  *
  * Layers
  * -------
- * 1. INNER DOT   a small royal-blue glowing dot that follows the pointer
- *                INSTANTLY (no easing) — the actual pointing node.
- * 2. OUTER RING  a larger transparent ring with a cyan/blue halo that
- *                follows on a delay (lerp), like a lagging satellite.
- * 3. PARTICLES   moving the pointer spawns glowing blue/cyan particles.
- *                Particles close to each other are linked with thin
- *                lines — a miniature "digital network" that fades out
- *                and self-cleans (bounded quantity).
- * 4. LOGO LINK   hovering the official logo animates a dashed link with
- *                two nodes — the cursor node connecting to the logo node.
+ * 1. INNER DOT   a small royal-blue dot that follows the pointer
+ *                INSTANTLY — the actual pointing node.
+ * 2. OUTER RING  a soft cyan ring that follows on a gentle delay; grows
+ *                over links/buttons and turns cyan inside nav bars.
+ * 3. TRAIL       a handful of quiet blue/cyan sparks trail the pointer
+ *                (canvas, NO connecting lines, bounded count) plus a tiny
+ *                ripple on click.
  *
  * Context behaviour
  * -----------------
- *  - buttons            -> the ring expands
- *  - navigation links   -> the ring grows further and turns cyan
- *  - profile cards      -> gentle magnetic pull toward the pointer
- *  - text inputs        -> the custom layers fade out; the NORMAL text
- *                          caret takes over (native cursor: text)
- *  - everywhere else   -> the native cursor is hidden (cursor: none via
- *                          a scoped stylesheet, removed on unmount)
+ *  - buttons / links     -> the ring expands gently
+ *  - navigation bars     -> the ring grows a touch more and turns cyan
+ *  - text inputs         -> the custom layers fade out; the native text
+ *                          caret takes over (cursor: text)
  *
  * Engineering notes: one rAF loop, pure transform/canvas writes, passive
- * listeners only (clicks, scroll and text selection are untouched).
- * Disabled on touch/coarse pointers and when prefers-reduced-motion is on.
+ * listeners only. Disabled on touch/coarse pointers and when
+ * prefers-reduced-motion is on.
  */
 
 import { useEffect, useRef } from 'react'
@@ -44,17 +38,12 @@ interface Particle {
   color: string
 }
 
-const MAX_PARTICLES = 70
-const LINK_DISTANCE = 82 // particle-to-particle network links
-const CURSOR_LINK_DISTANCE = 110 // cursor-to-particle links
-
-const PALETTE = ['#60A5FA', '#38BDF8', '#22D3EE', '#2563EB', '#67E8F9']
+const MAX_PARTICLES = 22
+const TRAIL_COLORS = ['#38BDF8', '#67E8F9', '#2563EB']
 
 const INTERACTIVE_SELECTOR =
   'a, button, [role="button"], [role="tab"], [role="menuitem"], summary, label, [data-cursor="hover"]'
 const INPUT_SELECTOR = 'input, textarea, [contenteditable="true"]'
-const CARD_SELECTOR = '.card'
-const LOGO_SELECTOR = 'img[src="/cu-setu-logo.png"]'
 
 const CURSOR_STYLE_ID = 'cu-network-cursor-style'
 const CURSOR_ACTIVE_CLASS = 'cu-network-cursor-on'
@@ -98,8 +87,6 @@ export function NetworkCursor() {
     let lastSpawnY = -100
 
     const particles: Particle[] = []
-    let magnetic: { el: HTMLElement; cx: number; cy: number } | null = null
-    let logoCenter: { x: number; y: number } | null = null
 
     // --------------------- scoped cursor:none stylesheet ----------------- //
     let styleEl: HTMLStyleElement | null = document.getElementById(CURSOR_STYLE_ID) as HTMLStyleElement | null
@@ -124,15 +111,18 @@ export function NetworkCursor() {
     const spawnParticle = (x: number, y: number, vx: number, vy: number) => {
       if (particles.length >= MAX_PARTICLES) particles.shift()
       particles.push({
-        x, y, vx, vy,
+        x,
+        y,
+        vx,
+        vy,
         life: 1,
-        decay: 0.45 + Math.random() * 0.45,
-        size: 1 + Math.random() * 1.8,
-        color: PALETTE[(Math.random() * PALETTE.length) | 0],
+        decay: 0.6 + Math.random() * 0.5,
+        size: 0.9 + Math.random() * 1.1,
+        color: TRAIL_COLORS[(Math.random() * TRAIL_COLORS.length) | 0],
       })
     }
 
-    const drawParticles = (dt: number) => {
+    const drawTrail = (dt: number) => {
       const w = window.innerWidth
       const h = window.innerHeight
       ctx.clearRect(0, 0, w, h)
@@ -148,81 +138,12 @@ export function NetworkCursor() {
         }
         p.x += p.vx * dt60
         p.y += p.vy * dt60
-        p.vx *= 0.96
-        p.vy *= 0.96
-        ctx.globalAlpha = Math.max(p.life, 0) * 0.85
+        p.vx *= 0.94
+        p.vy *= 0.94
+        ctx.globalAlpha = Math.max(p.life, 0) * 0.5
         ctx.fillStyle = p.color
         ctx.beginPath()
-        ctx.arc(p.x, p.y, Math.max(p.size * p.life, 0.3), 0, Math.PI * 2)
-        ctx.fill()
-      }
-
-      // particle <-> particle links (the "digital network")
-      ctx.globalAlpha = 1
-      for (let i = 0; i < particles.length; i += 1) {
-        const a = particles[i]
-        for (let j = i + 1; j < particles.length; j += 1) {
-          const b = particles[j]
-          const dx = a.x - b.x
-          const dy = a.y - b.y
-          const dist2 = dx * dx + dy * dy
-          if (dist2 < LINK_DISTANCE * LINK_DISTANCE) {
-            const dist = Math.sqrt(dist2)
-            const strength = (1 - dist / LINK_DISTANCE) * Math.min(a.life, b.life)
-            ctx.strokeStyle = `rgba(56, 189, 248, ${0.38 * strength})`
-            ctx.lineWidth = 1
-            ctx.beginPath()
-            ctx.moveTo(a.x, a.y)
-            ctx.lineTo(b.x, b.y)
-            ctx.stroke()
-          }
-        }
-      }
-
-      // cursor <-> nearby particles links
-      if (shown && !textMode) {
-        for (const p of particles) {
-          const dx = p.x - mx
-          const dy = p.y - my
-          const dist2 = dx * dx + dy * dy
-          if (dist2 < CURSOR_LINK_DISTANCE * CURSOR_LINK_DISTANCE) {
-            const dist = Math.sqrt(dist2)
-            const strength = (1 - dist / CURSOR_LINK_DISTANCE) * p.life
-            ctx.strokeStyle = `rgba(37, 99, 235, ${0.30 * strength})`
-            ctx.lineWidth = 1
-            ctx.beginPath()
-            ctx.moveTo(mx, my)
-            ctx.lineTo(p.x, p.y)
-            ctx.stroke()
-          }
-        }
-      }
-
-      // the logo link animation — two nodes + a live dashed connection
-      if (logoCenter && shown && !textMode) {
-        const { x: lx, y: ly } = logoCenter
-        const t = performance.now()
-        ctx.globalAlpha = 1
-        // dashed, flowing link line
-        ctx.strokeStyle = 'rgba(34, 211, 238, 0.8)'
-        ctx.lineWidth = 1.4
-        ctx.setLineDash([7, 9])
-        ctx.lineDashOffset = -(t / 45) % 16
-        ctx.beginPath()
-        ctx.moveTo(mx, my)
-        ctx.lineTo(lx, ly)
-        ctx.stroke()
-        ctx.setLineDash([])
-        // node at the logo end (+ gentle pulse)
-        const pulse = 8 + Math.sin(t / 260) * 2.5
-        ctx.strokeStyle = 'rgba(251, 146, 60, 0.9)'
-        ctx.lineWidth = 1.6
-        ctx.beginPath()
-        ctx.arc(lx, ly, pulse, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.fillStyle = 'rgba(251, 146, 60, 0.5)'
-        ctx.beginPath()
-        ctx.arc(lx, ly, 2.4, 0, Math.PI * 2)
+        ctx.arc(p.x, p.y, Math.max(p.size * p.life, 0.25), 0, Math.PI * 2)
         ctx.fill()
       }
 
@@ -231,34 +152,6 @@ export function NetworkCursor() {
     }
 
     // --------------------------- interactions -------------------------- //
-    const clearMagnetic = () => {
-      if (magnetic) {
-        magnetic.el.style.transition = 'transform 260ms cubic-bezier(0.22, 1, 0.36, 1)'
-        magnetic.el.style.transform = ''
-        magnetic = null
-      }
-    }
-
-    const applyMagnetic = (el: Element | null) => {
-      const card = el instanceof HTMLElement ? el.closest(CARD_SELECTOR) : null
-      if (card instanceof HTMLElement) {
-        const rect = card.getBoundingClientRect()
-        magnetic = { el: card, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 }
-        card.style.transition = 'transform 120ms ease-out'
-      } else {
-        clearMagnetic()
-      }
-    }
-
-    const magnetize = () => {
-      if (!magnetic) return
-      const dx = mx - magnetic.cx
-      const dy = my - magnetic.cy
-      const norm = Math.min(1, Math.hypot(dx, dy) / 160)
-      magnetic.el.style.transform =
-        `translate(${(dx / 160) * 7 * norm}px, ${(dy / 160) * 7 * norm}px)`
-    }
-
     const onMove = (event: MouseEvent) => {
       const px = event.clientX
       const py = event.clientY
@@ -270,13 +163,11 @@ export function NetworkCursor() {
       mx = px
       my = py
 
-      // spawn particles only when the pointer actually travelled
+      // spawn a quiet spark only when the pointer actually travelled
       const dx = px - lastSpawnX
       const dy = py - lastSpawnY
-      if (dx * dx + dy * dy > 30) {
-        const ang = Math.atan2(-dy, -dx)
-        spawnParticle(px, py, Math.cos(ang) * 0.4 + (Math.random() - 0.5) * 0.8,
-                      Math.sin(ang) * 0.4 + (Math.random() - 0.5) * 0.8)
+      if (dx * dx + dy * dy > 36) {
+        spawnParticle(px, py, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5)
         lastSpawnX = px
         lastSpawnY = py
       }
@@ -291,48 +182,28 @@ export function NetworkCursor() {
       if (textMode) {
         ringScaleTarget = 1
         ringCyan = false
-        clearMagnetic()
-        logoCenter = null
       } else {
         const interactive = target?.closest?.(INTERACTIVE_SELECTOR) ?? null
         const inNav = Boolean(interactive?.closest?.('nav'))
         ringCyan = inNav
-        ringScaleTarget = inNav ? 2.1 : interactive ? 1.6 : 1
-        applyMagnetic(target)
-        magnetize()
-        // logo proximity: approaching any official logo links the cursor
-        // node to the logo node with the animated dashed connection
-        logoCenter = null
-        const logos = document.querySelectorAll(LOGO_SELECTOR)
-        for (const logo of logos) {
-          const rect = logo.getBoundingClientRect()
-          if (rect.width === 0) continue
-          const cx = rect.left + rect.width / 2
-          const cy = rect.top + rect.height / 2
-          if (Math.hypot(mx - cx, my - cy) < 130) {
-            logoCenter = { x: cx, y: cy }
-            break
-          }
-        }
+        ringScaleTarget = inNav ? 1.9 : interactive ? 1.5 : 1
       }
     }
 
     const onDown = (event: MouseEvent) => {
       if (textMode) return
-      ringScaleTarget = Math.max(ringScaleTarget * 0.8, 0.8)
-      // a small burst of network particles on click
-      for (let i = 0; i < 8; i += 1) {
-        const ang = (i / 8) * Math.PI * 2 + Math.random() * 0.5
-        const speed = 0.8 + Math.random() * 1.6
-        spawnParticle(event.clientX, event.clientY,
-                      Math.cos(ang) * speed, Math.sin(ang) * speed)
+      ringScaleTarget = Math.max(ringScaleTarget * 0.85, 0.85)
+      // a tiny, quiet ripple on click
+      for (let i = 0; i < 6; i += 1) {
+        const ang = (i / 6) * Math.PI * 2 + Math.random() * 0.4
+        const speed = 0.5 + Math.random() * 0.9
+        spawnParticle(event.clientX, event.clientY, Math.cos(ang) * speed, Math.sin(ang) * speed)
       }
     }
 
     const onLeaveDocument = () => {
       shown = false
       particles.length = 0
-      clearMagnetic()
     }
 
     // ------------------------------ loop ------------------------------- //
@@ -340,7 +211,7 @@ export function NetworkCursor() {
       const dt = Math.min((now - lastFrame) / 1000, 0.05)
       lastFrame = now
 
-      ringX += (mx - ringX) * 0.16 // delayed satellite follow
+      ringX += (mx - ringX) * 0.16 // gentle delayed follow
       ringY += (my - ringY) * 0.16
       ringScale += (ringScaleTarget - ringScale) * 0.14
 
@@ -349,12 +220,12 @@ export function NetworkCursor() {
         `translate3d(${ringX}px, ${ringY}px, 0) translate(-50%, -50%) scale(${ringScale.toFixed(3)})`
       dot.style.opacity = textMode ? '0' : shown ? '1' : '0'
       ring.style.opacity = textMode ? '0' : shown ? '1' : '0'
-      ring.style.borderColor = ringCyan ? 'rgba(103, 232, 249, 0.85)' : 'rgba(56, 189, 248, 0.55)'
+      ring.style.borderColor = ringCyan ? 'rgba(103, 232, 249, 0.8)' : 'rgba(56, 189, 248, 0.5)'
       ring.style.boxShadow = ringCyan
-        ? '0 0 24px rgba(34, 211, 238, 0.45), inset 0 0 16px rgba(34, 211, 238, 0.22)'
-        : '0 0 18px rgba(56, 189, 248, 0.30), inset 0 0 12px rgba(59, 130, 246, 0.16)'
+        ? '0 0 20px rgba(34, 211, 238, 0.35), inset 0 0 12px rgba(34, 211, 238, 0.18)'
+        : '0 0 14px rgba(56, 189, 248, 0.22), inset 0 0 10px rgba(59, 130, 246, 0.14)'
 
-      drawParticles(dt)
+      drawTrail(dt)
       raf = requestAnimationFrame(tick)
     }
 
@@ -369,7 +240,6 @@ export function NetworkCursor() {
       window.removeEventListener('mousedown', onDown)
       document.documentElement.removeEventListener('mouseleave', onLeaveDocument)
       cancelAnimationFrame(raf)
-      clearMagnetic()
       document.documentElement.classList.remove(CURSOR_ACTIVE_CLASS)
       const style = document.getElementById(CURSOR_STYLE_ID)
       if (style) style.remove()
@@ -381,15 +251,15 @@ export function NetworkCursor() {
       aria-hidden="true"
       className="pointer-events-none fixed inset-0 z-[90] hidden [@media(hover:hover)_and_(pointer:fine)]:block"
     >
-      {/* particles + network links + logo link animation */}
+      {/* quiet spark trail (no connecting lines) */}
       <canvas ref={canvasRef} className="absolute inset-0 size-full" style={{ willChange: 'contents' }} />
-      {/* outer ring — delayed satellite with a cyan/blue halo */}
+      {/* outer ring — gentle delayed ring with a soft cyan halo */}
       <div
         ref={ringRef}
-        className="absolute left-0 top-0 size-[34px] rounded-full border-[1.5px] opacity-0"
+        className="absolute left-0 top-0 size-[32px] rounded-full border-[1.5px] opacity-0"
         style={{
-          borderColor: 'rgba(56, 189, 248, 0.55)',
-          boxShadow: '0 0 18px rgba(56, 189, 248, 0.30), inset 0 0 12px rgba(59, 130, 246, 0.16)',
+          borderColor: 'rgba(56, 189, 248, 0.5)',
+          boxShadow: '0 0 14px rgba(56, 189, 248, 0.22), inset 0 0 10px rgba(59, 130, 246, 0.14)',
           willChange: 'transform, opacity',
         }}
       />
@@ -399,7 +269,7 @@ export function NetworkCursor() {
         className="absolute left-0 top-0 size-[7px] rounded-full opacity-0"
         style={{
           background: '#2563EB',
-          boxShadow: '0 0 10px rgba(37, 99, 235, 0.95), 0 0 22px rgba(59, 130, 246, 0.45)',
+          boxShadow: '0 0 8px rgba(37, 99, 235, 0.9), 0 0 18px rgba(59, 130, 246, 0.4)',
           willChange: 'transform, opacity',
         }}
       />
