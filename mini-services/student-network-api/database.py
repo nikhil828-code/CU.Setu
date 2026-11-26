@@ -27,6 +27,8 @@ from typing import Dict, List, Optional, Set, Tuple
 from config import DB_PATH
 from models import Comment, ConnectionRequest, Notification, Post, User
 import models.connection as connection_status
+from models import (Collab, CollabApplication, CollabMember, ProjectContributor,
+                    ShowcaseProject)
 
 # --------------------------------------------------------------------------- #
 # Schema
@@ -97,6 +99,62 @@ CREATE TABLE IF NOT EXISTS comment_likes (
     username   TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (comment_id, username)
+);
+
+-- Collaboration Hub: posted project ideas looking for a team.
+CREATE TABLE IF NOT EXISTS collabs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner         TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    category      TEXT NOT NULL DEFAULT 'General',
+    skills_needed TEXT NOT NULL DEFAULT '',   -- comma separated
+    team_size     INTEGER NOT NULL DEFAULT 4,
+    status        TEXT NOT NULL DEFAULT 'open',  -- open | closed
+    created_at    TEXT NOT NULL
+);
+
+-- Collaboration Hub: one row per student on a team (owner + members).
+CREATE TABLE IF NOT EXISTS collab_members (
+    collab_id  INTEGER NOT NULL,
+    username   TEXT NOT NULL,
+    role       TEXT NOT NULL DEFAULT 'member',  -- owner | member
+    joined_at  TEXT NOT NULL,
+    PRIMARY KEY (collab_id, username)
+);
+
+-- Collaboration Hub: PENDING join applications only. Accept/reject
+-- delete the row (the same pure-queue convention as connection requests).
+CREATE TABLE IF NOT EXISTS collab_applications (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    collab_id  INTEGER NOT NULL,
+    applicant  TEXT NOT NULL,
+    message    TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE (collab_id, applicant)
+);
+
+-- Project Showcase: published student projects.
+CREATE TABLE IF NOT EXISTS projects (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner        TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
+    cover_url    TEXT NOT NULL DEFAULT '',   -- uploaded cover image URL
+    tech_stack   TEXT NOT NULL DEFAULT '',   -- comma separated
+    github_url   TEXT NOT NULL DEFAULT '',
+    demo_url     TEXT NOT NULL DEFAULT '',
+    category     TEXT NOT NULL DEFAULT 'General',
+    featured     INTEGER NOT NULL DEFAULT 0,  -- owner-toggled spotlight
+    created_at   TEXT NOT NULL
+);
+
+-- Project Showcase: credited contributors per project.
+CREATE TABLE IF NOT EXISTS project_contributors (
+    project_id INTEGER NOT NULL,
+    username   TEXT NOT NULL,
+    added_at   TEXT NOT NULL,
+    PRIMARY KEY (project_id, username)
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -538,6 +596,254 @@ def mark_all_notifications_read(recipient: str) -> None:
             conn.execute(
                 "UPDATE notifications SET is_read=1 WHERE recipient=?",
                 (recipient,),
+            )
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Collaboration Hub
+# --------------------------------------------------------------------------- #
+def insert_collab(owner: str, title: str, description: str, category: str,
+                  skills_needed: str, team_size: int, created_at: str) -> int:
+    conn = _connect()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO collabs (owner, title, description, category,"
+                " skills_needed, team_size, status, created_at)"
+                " VALUES (?,?,?,?,?,?, 'open', ?)",
+                (owner, title, description, category, skills_needed,
+                 team_size, created_at),
+            )
+            collab_id = cursor.lastrowid
+    finally:
+        conn.close()
+    return int(collab_id)
+
+
+def fetch_collabs() -> List[Collab]:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM collabs ORDER BY id DESC").fetchall()
+    finally:
+        conn.close()
+    return [
+        Collab(
+            id=row["id"], owner=row["owner"], title=row["title"],
+            description=row["description"], category=row["category"],
+            skills_needed=[s for s in row["skills_needed"].split(",") if s],
+            team_size=row["team_size"], status=row["status"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
+def update_collab_status(collab_id: int, status: str) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("UPDATE collabs SET status=? WHERE id=?", (status, collab_id))
+    finally:
+        conn.close()
+
+
+def delete_collab(collab_id: int) -> None:
+    """Remove a collaboration with its members and applications."""
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("DELETE FROM collab_applications WHERE collab_id=?", (collab_id,))
+            conn.execute("DELETE FROM collab_members WHERE collab_id=?", (collab_id,))
+            conn.execute("DELETE FROM collabs WHERE id=?", (collab_id,))
+    finally:
+        conn.close()
+
+
+def insert_collab_member(collab_id: int, username: str, role: str,
+                         joined_at: str) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO collab_members (collab_id, username, role,"
+                " joined_at) VALUES (?,?,?,?)",
+                (collab_id, username, role, joined_at),
+            )
+    finally:
+        conn.close()
+
+
+def fetch_collab_members() -> List[CollabMember]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM collab_members ORDER BY joined_at, username"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        CollabMember(row["collab_id"], row["username"], row["role"], row["joined_at"])
+        for row in rows
+    ]
+
+
+def insert_collab_application(collab_id: int, applicant: str, message: str,
+                              created_at: str) -> int:
+    conn = _connect()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO collab_applications (collab_id, applicant, message,"
+                " created_at) VALUES (?,?,?,?)",
+                (collab_id, applicant, message, created_at),
+            )
+            app_id = cursor.lastrowid
+    finally:
+        conn.close()
+    return int(app_id)
+
+
+def fetch_collab_applications() -> List[CollabApplication]:
+    """Every pending join application (the table is a pure pending queue)."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM collab_applications ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        CollabApplication(row["id"], row["collab_id"], row["applicant"],
+                          row["message"], "pending", row["created_at"])
+        for row in rows
+    ]
+
+
+def delete_collab_application(app_id: int) -> None:
+    """Terminal states (accepted / rejected) delete the pending row."""
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("DELETE FROM collab_applications WHERE id=?", (app_id,))
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Project Showcase
+# --------------------------------------------------------------------------- #
+def insert_project(owner: str, title: str, description: str, cover_url: str,
+                   tech_stack: str, github_url: str, demo_url: str,
+                   category: str, created_at: str) -> int:
+    conn = _connect()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "INSERT INTO projects (owner, title, description, cover_url,"
+                " tech_stack, github_url, demo_url, category, featured,"
+                " created_at) VALUES (?,?,?,?,?,?,?,?,0,?)",
+                (owner, title, description, cover_url, tech_stack,
+                 github_url, demo_url, category, created_at),
+            )
+            project_id = cursor.lastrowid
+    finally:
+        conn.close()
+    return int(project_id)
+
+
+def fetch_projects() -> List[ShowcaseProject]:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM projects ORDER BY id DESC").fetchall()
+    finally:
+        conn.close()
+    return [
+        ShowcaseProject(
+            id=row["id"], owner=row["owner"], title=row["title"],
+            description=row["description"], cover_url=row["cover_url"] or "",
+            tech_stack=[s for s in row["tech_stack"].split(",") if s],
+            github_url=row["github_url"], demo_url=row["demo_url"],
+            category=row["category"], featured=bool(row["featured"]),
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
+def update_project(project_id: int, title: str, description: str,
+                   cover_url: str, tech_stack: str, github_url: str,
+                   demo_url: str, category: str) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE projects SET title=?, description=?, cover_url=?,"
+                " tech_stack=?, github_url=?, demo_url=?, category=? WHERE id=?",
+                (title, description, cover_url, tech_stack, github_url,
+                 demo_url, category, project_id),
+            )
+    finally:
+        conn.close()
+
+
+def set_project_featured(project_id: int, featured: bool) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("UPDATE projects SET featured=? WHERE id=?",
+                         (1 if featured else 0, project_id))
+    finally:
+        conn.close()
+
+
+def delete_project(project_id: int) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute("DELETE FROM project_contributors WHERE project_id=?",
+                         (project_id,))
+            conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+    finally:
+        conn.close()
+
+
+def insert_project_contributor(project_id: int, username: str,
+                               added_at: str) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO project_contributors (project_id,"
+                " username, added_at) VALUES (?,?,?)",
+                (project_id, username, added_at),
+            )
+    finally:
+        conn.close()
+
+
+def fetch_project_contributors() -> List[ProjectContributor]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM project_contributors ORDER BY added_at, username"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        ProjectContributor(row["project_id"], row["username"], row["added_at"])
+        for row in rows
+    ]
+
+
+def delete_project_contributor(project_id: int, username: str) -> None:
+    conn = _connect()
+    try:
+        with conn:
+            conn.execute(
+                "DELETE FROM project_contributors WHERE project_id=? AND username=?",
+                (project_id, username),
             )
     finally:
         conn.close()

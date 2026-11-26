@@ -34,7 +34,7 @@ recommended through mutuals and Jaccard; a brand-new student falls back to
 programme / skills / interests similarity.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .graph import SocialGraph
 from .heap import top_k
@@ -117,4 +117,104 @@ def people_you_may_know(
         )
 
     # Top-K selection with a bounded heap, returned best-first.
+    return [info for _, info in top_k(scored, limit)]
+
+
+# --------------------------------------------------------------------------- #
+# Smart People Discovery 2.0 — weighted, configurable compatibility scoring
+# --------------------------------------------------------------------------- #
+DISCOVERY_WEIGHTS = {"mutual": 0.4, "skills": 0.3, "interests": 0.2, "major": 0.1}
+
+
+def smart_discovery(
+    graph: SocialGraph,
+    user: str,
+    profiles: Dict[str, dict],
+    limit: int = 12,
+    weights: Optional[Dict[str, float]] = None,
+) -> List[dict]:
+    """Smart People Discovery 2.0 — transparent weighted compatibility.
+
+    Four NORMALIZED factors (each in 0..1), the set-based ones measured
+    with Jaccard similarity (|A ∩ B| / |A ∪ B|):
+
+        mutual     J(my connections, their connections)   default 40%
+        skills     J(my skills, their skills)               default 30%
+        interests  J(my interests, their interests)         default 20%
+        major      1.0 when same programme, else 0.0         default 10%
+
+    compatibility = Σ weight_i * factor_i   (weights renormalized to sum 1,
+    so the result always reads as a 0..100 percentage).
+
+    Eligibility: never yourself, never an existing connection, never a
+    pending request in either direction.
+
+    Ranking: bounded top-K heap selection — best candidates first, exactly
+    like the classic recommender pipeline.
+    """
+    w = dict(DISCOVERY_WEIGHTS)
+    if weights:
+        for key in w:
+            raw = weights.get(key)
+            if raw is None:
+                continue
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            w[key] = value if value > 0 else 0.0
+    total = sum(w.values()) or 1.0
+    w = {key: value / total for key, value in w.items()}
+
+    me = profiles.get(user, {})
+    my_neighbors = graph.neighbors(user)
+    my_skills = {s.lower() for s in me.get("skills", [])}
+    my_interests = {i.lower() for i in me.get("interests", [])}
+    my_programme = me.get("programme") or ""
+
+    scored: List[tuple] = []
+    for candidate in graph.vertices():
+        # -- eligibility (same rules as the graph itself) ------------------ #
+        if candidate == user:
+            continue                       # never recommend yourself
+        if candidate in my_neighbors:
+            continue                       # already connected
+        if graph.pending_direction(user, candidate):
+            continue                       # pending request either way
+
+        their = profiles.get(candidate, {})
+        their_skills = {s.lower() for s in their.get("skills", [])}
+        their_interests = {i.lower() for i in their.get("interests", [])}
+
+        mutual = graph.mutual(user, candidate)      # set intersection
+        mutual_score = jaccard_similarity(my_neighbors, graph.neighbors(candidate))
+        skills_score = jaccard_similarity(my_skills, their_skills)
+        interests_score = jaccard_similarity(my_interests, their_interests)
+        same_major = bool(my_programme) and my_programme == (their.get("programme") or "")
+        major_score = 1.0 if same_major else 0.0
+
+        compatibility = (
+            w["mutual"] * mutual_score
+            + w["skills"] * skills_score
+            + w["interests"] * interests_score
+            + w["major"] * major_score
+        )
+
+        scored.append((compatibility, {
+            "username": candidate,
+            "mutual_count": len(mutual),
+            "mutual_names": sorted(mutual)[:5],
+            "shared_skills": sorted(my_skills & their_skills)[:8],
+            "shared_interests": sorted(my_interests & their_interests)[:8],
+            "same_programme": same_major,
+            "factors": {
+                "mutual": round(mutual_score, 3),
+                "skills": round(skills_score, 3),
+                "interests": round(interests_score, 3),
+                "major": round(major_score, 3),
+            },
+            "compatibility": round(compatibility, 3),
+        }))
+
+    # Weighted top-K: bounded heap, best-first.
     return [info for _, info in top_k(scored, limit)]

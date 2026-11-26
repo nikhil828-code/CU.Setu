@@ -30,6 +30,11 @@ export function gradientFor(username: string): string {
   return `linear-gradient(135deg, ${pair[0]} 0%, ${pair[1]} 100%)`
 }
 
+/** The two raw gradient colors — used by the Network Explorer canvas. */
+export function gradientColorsFor(username: string): [string, string] {
+  return GRADIENTS[hashString(username) % GRADIENTS.length]
+}
+
 export function initialsOf(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '?'

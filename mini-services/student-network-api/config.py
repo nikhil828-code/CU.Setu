@@ -44,8 +44,9 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 AVATAR_DIR = os.path.join(UPLOAD_DIR, "avatars")
 COVER_DIR = os.path.join(UPLOAD_DIR, "covers")
 POST_MEDIA_DIR = os.path.join(UPLOAD_DIR, "posts")
+PROJECT_MEDIA_DIR = os.path.join(UPLOAD_DIR, "projects")
 
-for _dir in (UPLOAD_DIR, AVATAR_DIR, COVER_DIR, POST_MEDIA_DIR):
+for _dir in (UPLOAD_DIR, AVATAR_DIR, COVER_DIR, POST_MEDIA_DIR, PROJECT_MEDIA_DIR):
     os.makedirs(_dir, exist_ok=True)
 
 # Largest single upload accepted by the Flask app (photos or videos).

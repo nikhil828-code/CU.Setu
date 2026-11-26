@@ -61,15 +61,20 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 /**
  * Multipart upload (profile photos, post photos / videos). The browser
  * sets the multipart Content-Type boundary itself, so no header is forced.
+ * `method` allows multipart PUTs (e.g. editing a project with a new cover).
  */
-export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+export async function apiUpload<T>(
+  path: string,
+  form: FormData,
+  method: 'POST' | 'PUT' = 'POST',
+): Promise<T> {
   const separator = path.includes('?') ? '&' : '?'
   const url = `/api${path}${separator}XTransformPort=${API_PORT}`
 
   let response: Response
   try {
     response = await fetch(url, {
-      method: 'POST',
+      method,
       body: form,
       credentials: 'same-origin',
     })

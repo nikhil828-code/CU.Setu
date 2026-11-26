@@ -47,11 +47,17 @@ def top_k(scored_items, k):
 
 
 class MinHeap:
-    """Array-based binary min-heap with an optional custom priority `key`."""
+    """Array-based binary min-heap with an optional custom priority `key`.
 
-    def __init__(self, key=None) -> None:
+    `on_swap` (optional) is called with (index_i, index_j) every time two
+    items swap — the DSA Playground uses it to record an animation trace
+    of the real sift operations.
+    """
+
+    def __init__(self, key=None, on_swap=None) -> None:
         self._key = key if key is not None else (lambda item: item)
         self._items: list = []
+        self._on_swap = on_swap
 
     # ------------------------------------------------------------------ #
     # Public interface
@@ -79,6 +85,10 @@ class MinHeap:
 
     def is_empty(self) -> bool:
         return not self._items
+
+    def snapshot(self) -> list:
+        """Copy of the underlying array (for animation traces / tests)."""
+        return list(self._items)
 
     def __len__(self) -> int:
         return len(self._items)
@@ -124,3 +134,5 @@ class MinHeap:
 
     def _swap(self, a: int, b: int) -> None:
         self._items[a], self._items[b] = self._items[b], self._items[a]
+        if self._on_swap is not None:
+            self._on_swap(a, b)

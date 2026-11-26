@@ -28,14 +28,21 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import database as db
 from config import PASSWORD_MIN, POST_MAX_CHARS
-from dsa.bfs import bfs_levels, connection_degrees, shortest_path
+from dsa.analytics import (complementary_skills, group_distribution,
+                            skill_counts, students_with_skill, top_skills)
+from dsa.bfs import bfs_levels, bfs_trace, connection_degrees, shortest_path
 from dsa.graph import SocialGraph
 from dsa.heap import MinHeap
-from dsa.recommendations import people_you_may_know
+from dsa.matching import rank_candidates
+from dsa.playground import (graph_build_trace, heap_trace, hashmap_trace,
+                             trie_insert_trace, trie_search_trace,
+                             trie_serialize)
+from dsa.recommendations import people_you_may_know, smart_discovery
 from dsa.trie import Trie
 from errors import ApiError          # re-exported for the route layer
-from models import (Comment, ConnectionRequest, Notification, Post, User,
-                    hash_password, verify_password)
+from models import (Collab, CollabApplication, CollabMember, Comment,
+                    ConnectionRequest, Notification, Post, ProjectContributor,
+                    ShowcaseProject, User, hash_password, verify_password)
 from models.connection import PENDING
 import seed
 
@@ -88,6 +95,13 @@ class Network:
         self.comments_by_id: Dict[int, Comment] = {}
         self.requests: Dict[int, ConnectionRequest] = {}
         self.notifications: Dict[str, List[Notification]] = {}
+        # Collaboration Hub: posted ideas, team rosters, pending applications
+        self.collabs: Dict[int, Collab] = {}
+        self.collab_members: Dict[int, List[CollabMember]] = {}
+        self.collab_apps: Dict[int, CollabApplication] = {}
+        # Project Showcase: published projects + credited contributors
+        self.projects: Dict[int, ShowcaseProject] = {}
+        self.project_contributors: Dict[int, List[ProjectContributor]] = {}
         self._post_counts: Dict[str, int] = {}
         self._indexed_keywords: Dict[str, List[str]] = {}
 
@@ -115,6 +129,11 @@ class Network:
             self.comment_likes, self.comments_by_id = {}, {}
             self.requests = {}
             self.notifications = {}
+            self.collabs = {}
+            self.collab_members = {}
+            self.collab_apps = {}
+            self.projects = {}
+            self.project_contributors = {}
             self._post_counts = {}
             self._indexed_keywords = {}
 
@@ -146,6 +165,20 @@ class Network:
 
             for note in db.fetch_all_notifications():
                 self.notifications.setdefault(note.recipient, []).append(note)
+
+            for collab in db.fetch_collabs():
+                self.collabs[collab.id] = collab
+                self.collab_members.setdefault(collab.id, [])
+            for member in db.fetch_collab_members():
+                self.collab_members.setdefault(member.collab_id, []).append(member)
+            for app in db.fetch_collab_applications():
+                self.collab_apps[app.id] = app
+
+            for project in db.fetch_projects():
+                self.projects[project.id] = project
+                self.project_contributors.setdefault(project.id, [])
+            for contributor in db.fetch_project_contributors():
+                self.project_contributors.setdefault(contributor.project_id, []).append(contributor)
 
     # ---------------------------------------------------------------------- #
     # Trie maintenance
@@ -526,6 +559,33 @@ class Network:
                 })
             return enriched
 
+    def smart_discovery(self, viewer: str, limit: int = 12,
+                        weights: Optional[dict] = None) -> List[dict]:
+        """Smart Discovery 2.0 — weighted compatibility ranking (Python heap).
+
+        Weights (mutual 40% / skills 30% / interests 20% / major 10% by
+        default) are configurable per request; factors are Jaccard
+        similarities computed on the in-memory graph and profile sets."""
+        with self._lock:
+            profiles = {
+                user.username: {
+                    "programme": user.programme,
+                    "year": user.year,
+                    "skills": user.skills,
+                    "interests": user.interests,
+                }
+                for user in self.users.values()
+            }
+            ranked = smart_discovery(self.graph, viewer, profiles, limit, weights)
+            enriched = []
+            for info in ranked:
+                enriched.append({
+                    **self.user_summary(info["username"]),
+                    **info,
+                    "relationship": self.relationship(viewer, info["username"]),
+                })
+            return enriched
+
     def connections_of(self, username: str) -> List[dict]:
         with self._lock:
             neighbors = self.graph.neighbors(username)
@@ -561,10 +621,12 @@ class Network:
     def path_between(self, username: str, other: str) -> dict:
         """Shortest connection chain via BFS (fewest intermediate students)."""
         with self._lock:
+            if username not in self.users:
+                raise ApiError("Student not found.", 404)
             if other not in self.users:
                 raise ApiError("Student not found.", 404)
             if other == username:
-                raise ApiError("That is your own profile.", 400)
+                raise ApiError("Pick two different students.", 400)
             chain = shortest_path(self.graph, username, other)
             return {
                 "source": username,
@@ -572,6 +634,49 @@ class Network:
                 "connected": self.graph.is_connected(username, other),
                 "path": chain,
                 "distance": (len(chain) - 1) if chain else None,
+            }
+
+    # ====================================================================== #
+    # Network Explorer — whole-graph payload + animated BFS trace
+    # ====================================================================== #
+    def network_graph(self, viewer: str) -> dict:
+        """Every student as a node (with graph degree + BFS level from the
+        viewer) and every ACCEPTED connection as an undirected edge.
+        Pending requests are deliberately NOT edges — the explorer shows the
+        real, accepted network only."""
+        with self._lock:
+            levels = bfs_levels(self.graph, viewer)
+            nodes = [{
+                **self.user_summary(username),
+                "level": levels.get(username),
+            } for username in sorted(self.users)]
+            edges = [{"source": a, "target": b}
+                     for a, b in self.graph.edge_pairs()]
+            total_degree = sum(node["connections_count"] for node in nodes)
+            return {
+                "viewer": viewer,
+                "nodes": nodes,
+                "edges": edges,
+                "stats": {
+                    "nodes": len(nodes),
+                    "edges": len(edges),
+                    "avg_degree": (round(total_degree / len(nodes), 2)
+                                   if nodes else 0),
+                },
+            }
+
+    def network_bfs(self, source: str) -> dict:
+        """Animated BFS from any student: one step per dequeue, carrying the
+        discovering parent, the BFS level, and the frontier snapshot —
+        computed by the real dsa.bfs algorithm over the in-memory graph."""
+        with self._lock:
+            if source not in self.users:
+                raise ApiError("Student not found.", 404)
+            steps = bfs_trace(self.graph, source)
+            return {
+                "source": source,
+                "steps": steps,
+                "reachable": len(steps),
             }
 
     def requests_for(self, username: str) -> dict:
@@ -631,6 +736,529 @@ class Network:
                 "posts": len(self.posts),
                 "pending_requests": len(self.requests),
             }
+
+    # ====================================================================== #
+    # Collaboration Hub — project ideas, applications, skill-matched rosters
+    # ====================================================================== #
+    def _require_collab(self, collab_id: int) -> Collab:
+        collab = self.collabs.get(collab_id)
+        if collab is None:
+            raise ApiError("Collaboration not found.", 404)
+        return collab
+
+    def _collab_roster(self, collab_id: int) -> List[CollabMember]:
+        return self.collab_members.get(collab_id, [])
+
+    def _collab_pending(self, collab_id: int) -> List[CollabApplication]:
+        return [app for app in self.collab_apps.values()
+                if app.collab_id == collab_id]
+
+    def serialize_collab(self, collab: Collab, viewer: str) -> dict:
+        roster = self._collab_roster(collab.id)
+        members = [self.user_summary(m.username) for m in roster]
+        pending = self._collab_pending(collab.id)
+        mine = next((app for app in pending if app.applicant == viewer), None)
+        my_role = next((m.role for m in roster if m.username == viewer), None)
+        return {
+            "id": collab.id,
+            "owner": self.user_summary(collab.owner),
+            "title": collab.title,
+            "description": collab.description,
+            "category": collab.category,
+            "skills_needed": collab.skills_needed,
+            "team_size": collab.team_size,
+            "status": collab.status,
+            "created_at": collab.created_at,
+            "members": members,
+            "member_count": len(members),
+            "open_spots": max(0, collab.team_size - len(members)),
+            "pending_count": len(pending),
+            "is_owner": collab.owner == viewer,
+            "my_status": ("owner" if my_role == "owner"
+                          else "member" if my_role
+                          else "applied" if mine
+                          else "none"),
+        }
+
+    def collabs_for(self, viewer: str) -> List[dict]:
+        """Every collaboration, newest first, serialized for the viewer."""
+        with self._lock:
+            return [self.serialize_collab(collab, viewer)
+                    for collab in sorted(self.collabs.values(),
+                                         key=lambda c: c.id, reverse=True)]
+
+    def collab_create(self, owner: str, title: str, description: str,
+                      category: str, skills: List[str], team_size: int) -> dict:
+        """Post a new project idea; the owner is the first team member."""
+        title = (title or "").strip()
+        description = (description or "").strip()
+        category = (category or "General").strip() or "General"
+        if not (4 <= len(title) <= 80):
+            raise ApiError("Give the idea a title of 4-80 characters.", 400)
+        if len(description) > 600:
+            raise ApiError("Keep the description under 600 characters.", 400)
+        clean_skills = [s.strip() for s in skills if s and s.strip()][:8]
+        if not (2 <= int(team_size) <= 10):
+            raise ApiError("Team size must be between 2 and 10.", 400)
+
+        with self._lock:
+            created = now_iso()
+            collab = Collab(
+                db.insert_collab(owner, title, description, category,
+                                 ",".join(clean_skills), int(team_size), created),
+                owner, title, description, category, clean_skills,
+                int(team_size), "open", created,
+            )
+            self.collabs[collab.id] = collab
+            self.collab_members[collab.id] = [CollabMember(collab.id, owner, "owner", created)]
+            db.insert_collab_member(collab.id, owner, "owner", created)
+            return self.serialize_collab(collab, owner)
+
+    def collab_apply(self, applicant: str, collab_id: int, message: str) -> dict:
+        """Apply to join: lands in the owner's pending application queue."""
+        with self._lock:
+            collab = self._require_collab(collab_id)
+            roster = {m.username for m in self._collab_roster(collab.id)}
+            if applicant in roster:
+                raise ApiError("You are already on this team.", 400)
+            if any(app.collab_id == collab.id and app.applicant == applicant
+                   for app in self.collab_apps.values()):
+                raise ApiError("Your application is already pending.", 400)
+            if collab.status != "open":
+                raise ApiError("This collaboration is closed.", 400)
+            if len(roster) >= collab.team_size:
+                raise ApiError("This team is already full.", 400)
+            if len(message) > 300:
+                raise ApiError("Keep the application message under 300 characters.", 400)
+
+            created = now_iso()
+            app = CollabApplication(
+                db.insert_collab_application(collab.id, applicant, message.strip(), created),
+                collab.id, applicant, message.strip(), "pending", created,
+            )
+            self.collab_apps[app.id] = app
+            self._notify(collab.owner, "collab_application", applicant,
+                         f"@{applicant} applied to join \"{collab.title}\".")
+            return {"ok": True, "status": "applied"}
+
+    def collab_applications_for(self, owner: str) -> List[dict]:
+        """Pending applications for every collaboration this student owns."""
+        with self._lock:
+            result = []
+            for app in sorted(self.collab_apps.values(), key=lambda a: a.id):
+                collab = self.collabs.get(app.collab_id)
+                if collab is None or collab.owner != owner:
+                    continue
+                result.append({
+                    "id": app.id,
+                    "collab_id": collab.id,
+                    "collab_title": collab.title,
+                    "message": app.message,
+                    "created_at": app.created_at,
+                    "applicant": self.user_summary(app.applicant),
+                })
+            return result
+
+    def _finish_collab_application(self, app_id: int, acting_owner: str,
+                                   accept: bool) -> dict:
+        app = self.collab_apps.get(app_id)
+        if app is None:
+            raise ApiError("Application not found.", 404)
+        collab = self._require_collab(app.collab_id)
+        if collab.owner != acting_owner:
+            raise ApiError("Only the owner can decide applications.", 403)
+        with self._lock:
+            del self.collab_apps[app_id]
+            db.delete_collab_application(app_id)
+            if accept:
+                joined = now_iso()
+                member = CollabMember(collab.id, app.applicant, "member", joined)
+                roster = self.collab_members.setdefault(collab.id, [])
+                if app.applicant not in {m.username for m in roster}:
+                    roster.append(member)
+                db.insert_collab_member(collab.id, app.applicant, "member", joined)
+                # accept may fill the last spot — close automatically
+                if len(roster) >= collab.team_size and collab.status == "open":
+                    collab.status = "closed"
+                    db.update_collab_status(collab.id, "closed")
+                self._notify(app.applicant, "collab_accepted", acting_owner,
+                            f"You joined \"{collab.title}\" — welcome aboard!")
+                return {"ok": True, "joined": collab.title}
+            self._notify(app.applicant, "collab_rejected", acting_owner,
+                         f"Your application for \"{collab.title}\" was not accepted.")
+            return {"ok": True, "rejected": app.applicant}
+
+    def collab_accept(self, owner: str, app_id: int) -> dict:
+        """Accept an application -> the applicant joins the roster."""
+        return self._finish_collab_application(app_id, owner, accept=True)
+
+    def collab_reject(self, owner: str, app_id: int) -> dict:
+        """Reject an application (the pending row is removed)."""
+        return self._finish_collab_application(app_id, owner, accept=False)
+
+    def collab_set_status(self, owner: str, collab_id: int, closed: bool) -> dict:
+        """Owner closes / reopens recruiting."""
+        with self._lock:
+            collab = self._require_collab(collab_id)
+            if collab.owner != owner:
+                raise ApiError("Only the owner can change recruiting status.", 403)
+            roster = self._collab_roster(collab.id)
+            if closed is False and len(roster) >= collab.team_size:
+                raise ApiError("The team is full — increase the size to reopen.", 400)
+            collab.status = "closed" if closed else "open"
+            db.update_collab_status(collab.id, collab.status)
+            return {"ok": True, "status": collab.status}
+
+    def collab_delete(self, owner: str, collab_id: int) -> dict:
+        """Delete an owned collaboration (roster + applications go too)."""
+        with self._lock:
+            collab = self._require_collab(collab_id)
+            if collab.owner != owner:
+                raise ApiError("Only the owner can delete this collaboration.", 403)
+            self.collab_apps = {k: v for k, v in self.collab_apps.items()
+                                if v.collab_id != collab_id}
+            self.collab_members.pop(collab_id, None)
+            del self.collabs[collab_id]
+            db.delete_collab(collab_id)
+            return {"ok": True, "deleted": collab_id}
+
+    def collab_candidates(self, owner: str, collab_id: int,
+                          limit: int = 10) -> List[dict]:
+        """Suggested teammates: hash-indexed skills + set matching + heap."""
+        with self._lock:
+            collab = self._require_collab(collab_id)
+            if collab.owner != owner:
+                raise ApiError("Only the owner can see ranked candidates.", 403)
+            profiles = {
+                user.username: {
+                    "skills": user.skills,
+                    "interests": user.interests,
+                    "programme": user.programme,
+                }
+                for user in self.users.values()
+            }
+            exclude = ({collab.owner}
+                       | {m.username for m in self._collab_roster(collab.id)}
+                       | {a.applicant for a in self._collab_pending(collab.id)})
+            ranked = rank_candidates(collab.skills_needed, profiles, exclude, limit)
+            enriched = []
+            for info in ranked:
+                enriched.append({
+                    **self.user_summary(info["username"]),
+                    **info,
+                    "relationship": self.relationship(owner, info["username"]),
+                })
+            return enriched
+
+    # ====================================================================== #
+    # DSA Playground — traces generated by the real algorithms
+    # ====================================================================== #
+    def playground_graph(self) -> dict:
+        """Graph build trace over the live student network."""
+        with self._lock:
+            students = sorted(self.users)
+            steps = graph_build_trace(self.graph, students)
+            nodes = [{
+                "username": username,
+                "full_name": self.users[username].full_name,
+                "degree": self.graph.degree(username),
+            } for username in students]
+            return {
+                "nodes": nodes,
+                "edges": [{"source": a, "target": b}
+                          for a, b in self.graph.edge_pairs()],
+                "steps": steps,
+                "stats": {
+                    "vertices": len(students),
+                    "edges": self.graph.edge_count(),
+                },
+            }
+
+    def playground_trie(self) -> dict:
+        """Build a Trie live from the first students' searchable keywords."""
+        with self._lock:
+            words: List[Tuple[str, str]] = []
+            for username in sorted(self.users)[:12]:
+                user = self.users[username]
+                words.append((username, username))
+                for name_word in user.full_name.split():
+                    name_word = name_word.strip().lower()
+                    if name_word:
+                        words.append((name_word, username))
+            trie, steps = trie_insert_trace(words)
+            return {
+                "words": [{"word": w, "owner": o} for w, o in words],
+                "steps": steps,
+                "tree": trie_serialize(trie.root),
+            }
+
+    def playground_trie_search(self, prefix: str) -> dict:
+        """Prefix search replayed on the REAL in-memory trie (every student)."""
+        with self._lock:
+            prefix = (prefix or "").strip().lower()
+            if not prefix:
+                raise ApiError("Type at least one character to search.", 400)
+            steps, matches = trie_search_trace(self.trie, prefix)
+            matched_names = [{"username": m, "full_name": self.users[m].full_name}
+                             for m in matches if m in self.users]
+            return {"prefix": prefix, "steps": steps,
+                    "matches": matched_names}
+
+    def playground_heap(self, values: Optional[List[float]] = None) -> dict:
+        """Min-heap animation: real student connection counts (default) or
+        custom numbers supplied by the learner."""
+        with self._lock:
+            if values:
+                clean = []
+                for value in values[:24]:
+                    try:
+                        clean.append((f"v{len(clean) + 1}", float(value)))
+                    except (TypeError, ValueError):
+                        continue
+                labels_note = "custom values"
+            else:
+                clean = [(username, float(self.graph.degree(username)))
+                         for username in sorted(self.users)]
+                labels_note = "each student's connection count (real data)"
+            steps = heap_trace(clean)
+            return {
+                "mode": labels_note,
+                "items": [{"label": label, "value": value} for label, value in clean],
+                "steps": steps,
+            }
+
+    def playground_hashmap(self) -> dict:
+        """Hash-map skill counter over every real student profile."""
+        with self._lock:
+            profiles = {
+                user.username: {"skills": user.skills}
+                for user in self.users.values()
+            }
+            return hashmap_trace(profiles, capacity=8)
+
+    # ====================================================================== #
+    # Project Showcase — published projects, covers, contributors, featured
+    # ====================================================================== #
+    def serialize_project(self, project: ShowcaseProject, viewer: str) -> dict:
+        contributors = [self.user_summary(c.username)
+                        for c in self.project_contributors.get(project.id, [])]
+        return {
+            "id": project.id,
+            "owner": self.user_summary(project.owner),
+            "title": project.title,
+            "description": project.description,
+            "cover_url": project.cover_url,
+            "tech_stack": project.tech_stack,
+            "github_url": project.github_url,
+            "demo_url": project.demo_url,
+            "category": project.category,
+            "featured": project.featured,
+            "created_at": project.created_at,
+            "contributors": contributors,
+            "is_mine": project.owner == viewer,
+        }
+
+    def projects_for(self, viewer: str, category: str = "") -> List[dict]:
+        """Every published project (newest first), optionally filtered by
+        category. Featured ones are flagged for the spotlight section."""
+        with self._lock:
+            wanted = category.strip().lower()
+            return [self.serialize_project(project, viewer)
+                    for project in sorted(self.projects.values(),
+                                           key=lambda p: p.id, reverse=True)
+                    if not wanted or project.category.strip().lower() == wanted]
+
+    def _require_project(self, project_id: int) -> ShowcaseProject:
+        project = self.projects.get(project_id)
+        if project is None:
+            raise ApiError("Project not found.", 404)
+        return project
+
+    @staticmethod
+    def _clean_project_fields(title: str, description: str, tech_stack: list,
+                               github_url: str, demo_url: str) -> dict:
+        title = (title or "").strip()
+        description = (description or "").strip()
+        if not (4 <= len(title) <= 80):
+            raise ApiError("Give the project a title of 4-80 characters.", 400)
+        if len(description) > 800:
+            raise ApiError("Keep the description under 800 characters.", 400)
+        skills = [s.strip() for s in tech_stack if s and s.strip()][:10]
+        github_url = (github_url or "").strip()
+        demo_url = (demo_url or "").strip()
+        for label, url in (("GitHub", github_url), ("Demo", demo_url)):
+            if url and not url.startswith(("http://", "https://")):
+                raise ApiError(f"{label} links must start with http:// or https://.", 400)
+        return {"title": title, "description": description,
+                "skills": skills, "github_url": github_url, "demo_url": demo_url}
+
+    def project_create(self, owner: str, title: str, description: str,
+                       cover_url: str, tech_stack: list, github_url: str,
+                       demo_url: str, category: str) -> dict:
+        """Publish a project (optionally with an uploaded cover image)."""
+        fields = self._clean_project_fields(title, description, tech_stack,
+                                            github_url, demo_url)
+        category = (category or "General").strip() or "General"
+        with self._lock:
+            created = now_iso()
+            project = ShowcaseProject(
+                db.insert_project(owner, fields["title"], fields["description"],
+                                  cover_url, ",".join(fields["skills"]),
+                                  fields["github_url"], fields["demo_url"],
+                                  category, created),
+                owner, fields["title"], fields["description"], cover_url,
+                fields["skills"], fields["github_url"], fields["demo_url"],
+                category, False, created,
+            )
+            self.projects[project.id] = project
+            self.project_contributors[project.id] = []
+            return self.serialize_project(project, owner)
+
+    def project_update(self, owner: str, project_id: int, title: str,
+                       description: str, cover_url: str, tech_stack: list,
+                       github_url: str, demo_url: str, category: str) -> dict:
+        """Edit an owned project (cover_url '' means 'keep existing')."""
+        with self._lock:
+            project = self._require_project(project_id)
+            if project.owner != owner:
+                raise ApiError("Only the owner can edit this project.", 403)
+            fields = self._clean_project_fields(title, description, tech_stack,
+                                                github_url, demo_url)
+            category = (category or "General").strip() or "General"
+            new_cover = cover_url if cover_url else project.cover_url
+            project.title = fields["title"]
+            project.description = fields["description"]
+            project.cover_url = new_cover
+            project.tech_stack = fields["skills"]
+            project.github_url = fields["github_url"]
+            project.demo_url = fields["demo_url"]
+            project.category = category
+            db.update_project(project.id, project.title, project.description,
+                               project.cover_url, ",".join(project.tech_stack),
+                               project.github_url, project.demo_url,
+                               project.category)
+            return self.serialize_project(project, owner)
+
+    def project_toggle_featured(self, owner: str, project_id: int) -> dict:
+        """Owner toggles the spotlight (featured) flag on their project."""
+        with self._lock:
+            project = self._require_project(project_id)
+            if project.owner != owner:
+                raise ApiError("Only the owner can feature this project.", 403)
+            project.featured = not project.featured
+            db.set_project_featured(project.id, project.featured)
+            return {"ok": True, "featured": project.featured}
+
+    def project_delete(self, owner: str, project_id: int) -> dict:
+        """Delete an owned project (contributors go with it)."""
+        with self._lock:
+            project = self._require_project(project_id)
+            if project.owner != owner:
+                raise ApiError("Only the owner can delete this project.", 403)
+            self.project_contributors.pop(project_id, None)
+            del self.projects[project_id]
+            db.delete_project(project_id)
+            return {"ok": True, "deleted": project_id}
+
+    def project_add_contributor(self, owner: str, project_id: int,
+                                username: str) -> dict:
+        """Credit a contributor on an owned project."""
+        username = (username or "").strip().lower()
+        with self._lock:
+            project = self._require_project(project_id)
+            if project.owner != owner:
+                raise ApiError("Only the owner can add contributors.", 403)
+            if username not in self.users:
+                raise ApiError("Student not found.", 404)
+            if username == project.owner:
+                raise ApiError("The owner is already credited.", 400)
+            roster = self.project_contributors.setdefault(project_id, [])
+            if any(c.username == username for c in roster):
+                raise ApiError("@%s is already credited." % username, 400)
+            added = now_iso()
+            roster.append(ProjectContributor(project_id, username, added))
+            db.insert_project_contributor(project_id, username, added)
+            self._notify(username, "project_contributor", owner,
+                         f"@{owner} credited you as a contributor on \"{project.title}\".")
+            return {"ok": True, "added": username}
+
+    def project_remove_contributor(self, owner: str, project_id: int,
+                                   username: str) -> dict:
+        """Remove a credited contributor from an owned project."""
+        username = (username or "").strip().lower()
+        with self._lock:
+            project = self._require_project(project_id)
+            if project.owner != owner:
+                raise ApiError("Only the owner can remove contributors.", 403)
+            roster = self.project_contributors.get(project_id, [])
+            if not any(c.username == username for c in roster):
+                raise ApiError("That student is not credited on this project.", 404)
+            self.project_contributors[project_id] = [
+                c for c in roster if c.username != username]
+            db.delete_project_contributor(project_id, username)
+            return {"ok": True, "removed": username}
+
+    # ====================================================================== #
+    # Campus Skill Analytics — hash-map counts, heap rankings, set logic
+    # ====================================================================== #
+    def _profile_view(self) -> Dict[str, dict]:
+        """username -> {programme, year, skills, interests} for the analytics
+        and matching engines (a read-only projection of the user hash table)."""
+        return {
+            user.username: {
+                "programme": user.programme,
+                "year": user.year,
+                "skills": user.skills,
+                "interests": user.interests,
+            }
+            for user in self.users.values()
+        }
+
+    def skill_analytics(self) -> dict:
+        """The whole analytics payload, computed live from real profiles."""
+        with self._lock:
+            profiles = self._profile_view()
+            counts = skill_counts(profiles)
+            top = top_skills(counts, 12)
+            students_count = len(self.users)
+            for entry in top:
+                entry["pct"] = round(100 * entry["count"] / students_count, 1) if students_count else 0
+            by_programme = group_distribution(profiles, "programme")
+            by_year = group_distribution(profiles, "year")
+            return {
+                "students": students_count,
+                "distinct_skills": len(counts),
+                "total_listings": sum(counts.values()),
+                "top": top,
+                "by_programme": by_programme,
+                "by_year": by_year,
+            }
+
+    def students_by_skill(self, skill: str) -> List[dict]:
+        """Who knows this skill? Inverted-index lookup + rich summaries."""
+        with self._lock:
+            if not skill or not skill.strip():
+                raise ApiError("Type a skill to search for.", 400)
+            profiles = self._profile_view()
+            usernames = students_with_skill(profiles, skill)
+            wanted = skill.strip().lower()
+            return [self.user_summary(u) for u in usernames
+                    if wanted in {s.strip().lower() for s in self.users[u].skills}]
+
+    def complementary_for_skill(self, skill: str) -> dict:
+        """Skills that pair best with the given skill (set co-occurrence)."""
+        with self._lock:
+            if not skill or not skill.strip():
+                raise ApiError("Type a skill first.", 400)
+            profiles = self._profile_view()
+            wanted = skill.strip().lower()
+            exists = any(wanted in {s.strip().lower() for s in p.get("skills", [])}
+                        for p in profiles.values())
+            if not exists:
+                raise ApiError("No student on campus has that skill yet.", 404)
+            ranked = complementary_skills(profiles, wanted)
+            return {"skill": wanted, "complementary": ranked}
+
 
     # ====================================================================== #
     # Serialisation helpers

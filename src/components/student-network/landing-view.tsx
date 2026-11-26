@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
 
+import { AboutDialog } from '@/components/student-network/about-dialog'
 import { BrandMark } from '@/components/student-network/brand-mark'
 import { StatChip } from '@/components/student-network/stat-chip'
 import { Button } from '@/components/ui/button'
@@ -251,6 +252,9 @@ export function LandingView() {
             <button type="button" className="hover:text-white" onClick={() => goto('register')}>
               Sign up
             </button>
+            <AboutDialog>
+              <button type="button" className="hover:text-white">About</button>
+            </AboutDialog>
           </nav>
         </div>
       </footer>

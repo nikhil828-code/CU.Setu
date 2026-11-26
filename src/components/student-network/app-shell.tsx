@@ -2,10 +2,17 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  BarChart3,
   Bell,
+  Briefcase,
   Compass,
+  FlaskConical,
+  FolderKanban,
+  GitBranch,
   Home,
+  Info,
   LogOut,
+  Menu,
   Search,
   UserPlus,
   UserRound,
@@ -15,8 +22,10 @@ import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { BrandMark } from '@/components/student-network/brand-mark'
+import { AboutDialog } from '@/components/student-network/about-dialog'
 import { UserAvatar } from '@/components/student-network/user-avatar'
 import { Button } from '@/components/ui/button'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { toast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import type { NotificationItem, RequestItem, SentRequestItem } from '@/lib/types'
@@ -126,6 +135,41 @@ export function AppShell({ children }: { children: ReactNode }) {
       navigate: () => goto('discover'),
     },
     {
+      key: 'network',
+      label: 'Network Explorer',
+      icon: GitBranch,
+      view: 'network',
+      navigate: () => goto('network'),
+    },
+    {
+      key: 'collab',
+      label: 'Collaboration Hub',
+      icon: Briefcase,
+      view: 'collab',
+      navigate: () => goto('collab'),
+    },
+    {
+      key: 'playground',
+      label: 'DSA Playground',
+      icon: FlaskConical,
+      view: 'playground',
+      navigate: () => goto('playground'),
+    },
+    {
+      key: 'showcase',
+      label: 'Project Showcase',
+      icon: FolderKanban,
+      view: 'showcase',
+      navigate: () => goto('showcase'),
+    },
+    {
+      key: 'analytics',
+      label: 'Skill Analytics',
+      icon: BarChart3,
+      view: 'analytics',
+      navigate: () => goto('analytics'),
+    },
+    {
       key: 'search',
       label: 'Search',
       icon: Search,
@@ -145,8 +189,25 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isActive = (item: NavItem) =>
     view === item.view && (item.view !== 'profile' || profileTarget === me.username)
 
+  // Grouped navigation: everyday menu first, the DSA-powered platforms
+  // under "Explore" — every one of the ten destinations stays one click away.
+  const navGroups: { label: string; items: NavItem[] }[] = [
+    {
+      label: 'Menu',
+      items: navItems.filter((item) =>
+        ['feed', 'profile', 'connections', 'requests', 'discover', 'search', 'notifications'].includes(item.view),
+      ),
+    },
+    {
+      label: 'Explore',
+      items: navItems.filter((item) =>
+        ['network', 'collab', 'showcase', 'analytics', 'playground'].includes(item.view),
+      ),
+    },
+  ]
+
   const tabItems = navItems.filter((item) =>
-    ['feed', 'discover', 'search', 'requests', 'profile'].includes(item.view),
+    ['feed', 'discover', 'network', 'notifications', 'profile'].includes(item.view),
   )
 
   return (
@@ -172,35 +233,42 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="relative text-lg font-semibold text-white">CU.Setu</span>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2" aria-label="Primary">
-          {navItems.map((item) => {
-            const active = isActive(item)
-            return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={item.navigate}
-                aria-current={active ? 'page' : undefined}
-                className={cn(
-                  'relative flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#60A5FA]',
-                  active
-                    ? 'bg-white/10 text-white'
-                    : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
-                )}
-              >
-                {active ? (
-                  <span
-                    className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-amber-400 to-orange-600"
-                    aria-hidden="true"
-                  />
-                ) : null}
-                <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
-                <span className="flex-1 text-left">{item.label}</span>
-                {item.badge && item.badge > 0 ? (
-                  <CountBadge value={item.badge} />
-                ) : null}
-              </button>
-            )
-          })}
+          {navGroups.map((group) => (
+            <div key={group.label} className="mb-1">
+              <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                {group.label}
+              </p>
+              {group.items.map((item) => {
+                const active = isActive(item)
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={item.navigate}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'relative flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#60A5FA]',
+                      active
+                        ? 'bg-white/10 text-white'
+                        : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
+                    )}
+                  >
+                    {active ? (
+                      <span
+                        className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gradient-to-b from-amber-400 to-orange-600"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {item.badge && item.badge > 0 ? (
+                      <CountBadge value={item.badge} />
+                    ) : null}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </nav>
         <div className="border-t border-white/10 p-3">
           <div className="flex items-center gap-3 rounded-lg p-2">
@@ -210,6 +278,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               <p className="truncate text-xs text-slate-400">@{me.username}</p>
             </div>
           </div>
+          <AboutDialog>
+            <button
+              type="button"
+              className="mb-1 flex h-8 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-100"
+            >
+              <Info className="size-[15px]" aria-hidden="true" />
+              About CU.Setu
+            </button>
+          </AboutDialog>
           <Button
             variant="ghost"
             size="sm"
@@ -239,6 +316,75 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="relative text-base font-semibold text-white">CU.Setu</span>
         </button>
         <div className="flex items-center gap-1">
+          {/* Full navigation drawer (small screens) */}
+          <Sheet>
+            <SheetTrigger asChild>
+              <button
+                type="button"
+                aria-label="Open navigation menu"
+                className="flex size-10 items-center justify-center rounded-full text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <Menu className="size-5" aria-hidden="true" />
+              </button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 border-white/10 bg-[#0F1F46] p-0">
+              <SheetHeader className="border-b border-white/10 px-5 py-4">
+                <SheetTitle className="flex items-center gap-2 text-white">
+                  <BrandMark className="h-7 w-auto" />
+                  CU.Setu
+                </SheetTitle>
+              </SheetHeader>
+              <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2" aria-label="Mobile full navigation">
+                {navGroups.map((group) => (
+                  <div key={group.label} className="mb-1">
+                    <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      {group.label}
+                    </p>
+                    {group.items.map((item) => {
+                      const active = isActive(item)
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={item.navigate}
+                          aria-current={active ? 'page' : undefined}
+                          className={cn(
+                            'flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors',
+                            active
+                              ? 'bg-white/10 text-white'
+                              : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
+                          )}
+                        >
+                          <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
+                          <span className="flex-1 text-left">{item.label}</span>
+                          {item.badge && item.badge > 0 ? <CountBadge value={item.badge} /> : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))}
+              </nav>
+              <div className="border-t border-white/10 p-3">
+                <div className="mb-2 flex items-center gap-3 rounded-lg p-2">
+                  <UserAvatar username={me.username} fullName={me.full_name} avatarUrl={me.avatar_url} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-white">{me.full_name}</p>
+                    <p className="truncate text-xs text-slate-400">@{me.username}</p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => logoutMutation.mutate()}
+                  disabled={logoutMutation.isPending}
+                  className="w-full justify-start gap-2 text-slate-400 hover:bg-white/5 hover:text-white"
+                >
+                  <LogOut size="16" aria-hidden="true" />
+                  {logoutMutation.isPending ? 'Logging out…' : 'Log out'}
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
           <button
             type="button"
             onClick={() => goto('notifications')}

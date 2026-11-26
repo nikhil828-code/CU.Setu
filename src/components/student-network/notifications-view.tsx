@@ -6,7 +6,9 @@ import {
   BellOff,
   CheckCheck,
   CheckCircle2,
+  Handshake,
   Heart,
+  Lightbulb,
   MessageCircle,
   UserPlus,
   XCircle,
@@ -48,6 +50,26 @@ const KIND_META: Record<
     icon: MessageCircle,
     className: 'bg-violet-100 text-violet-600',
     label: 'Reply to comment',
+  },
+  collab_application: {
+    icon: Lightbulb,
+    className: 'bg-amber-100 text-amber-600',
+    label: 'Collab application',
+  },
+  collab_accepted: {
+    icon: Handshake,
+    className: 'bg-emerald-100 text-emerald-600',
+    label: 'Collab joined',
+  },
+  collab_rejected: {
+    icon: XCircle,
+    className: 'bg-rose-100 text-rose-600',
+    label: 'Collab declined',
+  },
+  project_contributor: {
+    icon: UserPlus,
+    className: 'bg-amber-100 text-amber-600',
+    label: 'Project contributor',
   },
 }
 

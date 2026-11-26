@@ -88,3 +88,16 @@ def save_cover(raw_storage, username: str) -> str:
     _validate(raw_storage, MAX_COVER_BYTES, "profile background")
     return _store(raw_storage, config.COVER_DIR, username,
                   _extension_of(raw_storage.filename))
+
+
+MAX_PROJECT_COVER_BYTES = 10 * 1024 * 1024    # 10 MB project cover image
+
+
+def save_project_cover(raw_storage, username: str) -> str:
+    """Validate + persist a Project Showcase cover image. Returns the URL."""
+    if _extension_of(raw_storage.filename or "") not in config.IMAGE_EXTENSIONS:
+        raise ApiError("Project covers must be an image "
+                      "(png, jpg, jpeg, gif or webp).", 400)
+    _validate(raw_storage, MAX_PROJECT_COVER_BYTES, "project cover")
+    return _store(raw_storage, config.PROJECT_MEDIA_DIR, username,
+                  _extension_of(raw_storage.filename))

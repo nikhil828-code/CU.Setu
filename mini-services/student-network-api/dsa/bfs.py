@@ -118,3 +118,37 @@ def bfs_visit_order(graph: SocialGraph, source: str) -> List[str]:
                 seen.add(neighbor)
                 frontier.enqueue(neighbor)
     return order
+
+
+def bfs_trace(graph: SocialGraph, source: str) -> List[dict]:
+    """Step-by-step BFS trace for the animated Network Explorer traversal.
+
+    Each step records one DEQUEUE event:
+        node    the student dequeued at this step
+        parent  the student who first discovered `node` (None for the source)
+        level   BFS level (hops from the source)
+        queue   snapshot of the frontier AFTER the dequeue, front-to-back
+
+    The frontend replays these frames in order to animate exactly what the
+    algorithm did — the same parent map that powers shortest_path, exposed
+    as a trace.
+    """
+    steps: List[dict] = []
+    parent = {source: None}
+    levels = {source: 0}
+    frontier = LinkedQueue()
+    frontier.enqueue(source)
+    while frontier:
+        current = frontier.dequeue()
+        steps.append({
+            "node": current,
+            "parent": parent[current],
+            "level": levels[current],
+            "queue": frontier.to_list(),
+        })
+        for neighbor in sorted(graph.neighbors(current)):
+            if neighbor not in parent:
+                parent[neighbor] = current
+                levels[neighbor] = levels[current] + 1
+                frontier.enqueue(neighbor)
+    return steps

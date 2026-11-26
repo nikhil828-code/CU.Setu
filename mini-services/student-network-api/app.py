@@ -14,13 +14,18 @@ from flask import Flask, jsonify
 import config
 from network import network_state
 from routes.auth import auth_bp
+from routes.analytics import analytics_bp
+from routes.collaborations import collaborations_bp
 from routes.connections import connections_bp
 from routes.media import media_bp
+from routes.network import network_bp
 from routes.notifications import notifications_bp
+from routes.playground import playground_bp
 from routes.posts import posts_bp
 from routes.profile import profile_bp
 from routes.recommendations import recommendations_bp
 from routes.search import search_bp
+from routes.showcase import showcase_bp
 
 
 def create_app() -> Flask:
@@ -34,7 +39,8 @@ def create_app() -> Flask:
     )
 
     blueprints = (auth_bp, profile_bp, connections_bp, posts_bp, search_bp,
-                  recommendations_bp, notifications_bp, media_bp)
+                  recommendations_bp, notifications_bp, media_bp, network_bp,
+                  collaborations_bp, playground_bp, showcase_bp, analytics_bp)
     for blueprint in blueprints:
         app.register_blueprint(blueprint)
 

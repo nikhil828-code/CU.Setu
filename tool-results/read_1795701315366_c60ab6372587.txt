@@ -1,0 +1,1181 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * Collaboration Hub — post project ideas, build teams and review
+     5→ * skill-matched teammate suggestions.
+     6→ *
+     7→ * Data comes straight from the Flask backend (`/api/collabs`,
+     8→ * `/api/collab-applications`, `/api/collabs/{id}/candidates`) — nothing is
+     9→ * hardcoded. Owner-only controls (applications, suggestions, close/reopen
+    10→ * recruiting, delete) render only for the student who posted the idea.
+    11→ */
+    12→
+    13→import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+    14→import { motion } from 'framer-motion'
+    15→import {
+    16→  Check,
+    17→  CheckCircle2,
+    18→  Clock,
+    19→  Inbox,
+    20→  Lightbulb,
+    21→  Loader2,
+    22→  Lock,
+    23→  LockOpen,
+    24→  MoreHorizontal,
+    25→  Plus,
+    26→  Sparkles,
+    27→  Trash2,
+    28→  UserPlus,
+    29→  Users,
+    30→  X,
+    31→} from 'lucide-react'
+    32→import { useState } from 'react'
+    33→
+    34→import { EmptyState } from '@/components/student-network/empty-state'
+    35→import { SectionHeader } from '@/components/student-network/section-header'
+    36→import { UserAvatar } from '@/components/student-network/user-avatar'
+    37→import {
+    38→  AlertDialog,
+    39→  AlertDialogAction,
+    40→  AlertDialogCancel,
+    41→  AlertDialogContent,
+    42→  AlertDialogDescription,
+    43→  AlertDialogFooter,
+    44→  AlertDialogHeader,
+    45→  AlertDialogTitle,
+    46→} from '@/components/ui/alert-dialog'
+    47→import { Badge } from '@/components/ui/badge'
+    48→import { Button } from '@/components/ui/button'
+    49→import { Card, CardContent } from '@/components/ui/card'
+    50→import {
+    51→  Dialog,
+    52→  DialogContent,
+    53→  DialogDescription,
+    54→  DialogFooter,
+    55→  DialogHeader,
+    56→  DialogTitle,
+    57→} from '@/components/ui/dialog'
+    58→import {
+    59→  DropdownMenu,
+    60→  DropdownMenuContent,
+    61→  DropdownMenuItem,
+    62→  DropdownMenuTrigger,
+    63→} from '@/components/ui/dropdown-menu'
+    64→import { Input } from '@/components/ui/input'
+    65→import { Label } from '@/components/ui/label'
+    66→import {
+    67→  Select,
+    68→  SelectContent,
+    69→  SelectItem,
+    70→  SelectTrigger,
+    71→  SelectValue,
+    72→} from '@/components/ui/select'
+    73→import { Skeleton } from '@/components/ui/skeleton'
+    74→import { Slider } from '@/components/ui/slider'
+    75→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    76→import { Textarea } from '@/components/ui/textarea'
+    77→import { toast } from '@/hooks/use-toast'
+    78→import { ApiError, apiFetch } from '@/lib/api'
+    79→import { timeAgo } from '@/lib/time'
+    80→import type { CollabApplicationItem, CollabCandidate, CollabItem } from '@/lib/types'
+    81→import { useAppStore } from '@/store/app-store'
+    82→import { cn } from '@/lib/utils'
+    83→
+    84→const CATEGORIES = [
+    85→  'DSA',
+    86→  'Web',
+    87→  'AI & ML',
+    88→  'Mobile',
+    89→  'Hardware',
+    90→  'Research',
+    91→  'Startup',
+    92→  'General',
+    93→] as const
+    94→
+    95→const TEAM_MIN = 2
+    96→const TEAM_MAX = 10
+    97→
+    98→type CollabFilter = 'all' | 'open' | 'mine'
+    99→
+   100→/** Parse a comma-separated skills string into clean chips. */
+   101→function csvToSkills(csv: string): string[] {
+   102→  return csv
+   103→    .split(',')
+   104→    .map((item) => item.trim())
+   105→    .filter((item) => item !== '')
+   106→}
+   107→
+   108→function errText(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+   109→  return error instanceof ApiError ? error.message : fallback
+   110→}
+   111→
+   112→/** Invalidate every collab query after a mutation (prefix-matched keys). */
+   113→function invalidateCollabs(queryClient: QueryClient): void {
+   114→  queryClient.invalidateQueries({ queryKey: ['collabs'] })
+   115→  queryClient.invalidateQueries({ queryKey: ['collab-applications'] })
+   116→  queryClient.invalidateQueries({ queryKey: ['collab-candidates'] })
+   117→}
+   118→
+   119→function CollabCardSkeleton() {
+   120→  return (
+   121→    <Card className="shadow-sm">
+   122→      <CardContent className="p-4">
+   123→        <div className="flex items-start justify-between gap-2">
+   124→          <Skeleton className="h-5 w-48" />
+   125→          <Skeleton className="h-5 w-16 rounded-full" />
+   126→        </div>
+   127→        <div className="mt-3 flex items-center gap-2">
+   128→          <Skeleton className="size-8 rounded-full" />
+   129→          <Skeleton className="h-4 w-28" />
+   130→        </div>
+   131→        <div className="mt-3 space-y-2">
+   132→          <Skeleton className="h-3.5 w-full" />
+   133→          <Skeleton className="h-3.5 w-4/5" />
+   134→        </div>
+   135→        <div className="mt-3 flex gap-1.5">
+   136→          <Skeleton className="h-5 w-20 rounded-full" />
+   137→          <Skeleton className="h-5 w-16 rounded-full" />
+   138→          <Skeleton className="h-5 w-14 rounded-full" />
+   139→        </div>
+   140→        <div className="mt-4 flex items-center gap-2">
+   141→          <Skeleton className="size-8 rounded-full" />
+   142→          <Skeleton className="h-3.5 w-32" />
+   143→        </div>
+   144→        <Skeleton className="mt-4 h-8 w-full rounded-md" />
+   145→      </CardContent>
+   146→    </Card>
+   147→  )
+   148→}
+   149→
+   150→/* ------------------------------ Post an idea -------------------------------- */
+   151→
+   152→function PostIdeaForm({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+   153→  const queryClient = useQueryClient()
+   154→
+   155→  const [title, setTitle] = useState('')
+   156→  const [description, setDescription] = useState('')
+   157→  const [category, setCategory] = useState<string>('General')
+   158→  const [skills, setSkills] = useState('')
+   159→  const [teamSize, setTeamSize] = useState(4)
+   160→  const [error, setError] = useState<string | null>(null)
+   161→
+   162→  const skillChips = csvToSkills(skills)
+   163→
+   164→  const createMutation = useMutation({
+   165→    mutationFn: () =>
+   166→      apiFetch<CollabItem>('/collabs', {
+   167→        method: 'POST',
+   168→        body: JSON.stringify({
+   169→          title: title.trim(),
+   170→          description: description.trim(),
+   171→          category,
+   172→          skills_needed: skillChips,
+   173→          team_size: teamSize,
+   174→        }),
+   175→      }),
+   176→    onSuccess: () => {
+   177→      invalidateCollabs(queryClient)
+   178→      onOpenChange(false)
+   179→      toast({
+   180→        title: 'Idea posted',
+   181→        description: 'Your project is live — skill-matched teammates can apply to join now.',
+   182→      })
+   183→    },
+   184→    onError: (mutationError) => {
+   185→      toast({
+   186→        title: 'Could not post idea',
+   187→        description: errText(mutationError),
+   188→        variant: 'destructive',
+   189→      })
+   190→    },
+   191→  })
+   192→
+   193→  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+   194→    event.preventDefault()
+   195→    if (createMutation.isPending) return
+   196→    if (title.trim().length < 4) {
+   197→      setError('Title must be at least 4 characters.')
+   198→      return
+   199→    }
+   200→    setError(null)
+   201→    createMutation.mutate()
+   202→  }
+   203→
+   204→  return (
+   205→    <form onSubmit={handleSubmit} className="space-y-4">
+   206→      <div className="space-y-2">
+   207→        <div className="flex items-center justify-between">
+   208→          <Label htmlFor="collab-title">Title</Label>
+   209→          <span
+   210→            className={cn(
+   211→              'text-xs tabular-nums',
+   212→              title.length > 80 ? 'text-destructive' : 'text-muted-foreground',
+   213→            )}
+   214→          >
+   215→            {title.length}/80
+   216→          </span>
+   217→        </div>
+   218→        <Input
+   219→          id="collab-title"
+   220→          value={title}
+   221→          onChange={(e) => setTitle(e.target.value)}
+   222→          maxLength={80}
+   223→          placeholder="e.g. Campus Food Review App"
+   224→        />
+   225→      </div>
+   226→
+   227→      <div className="space-y-2">
+   228→        <Label htmlFor="collab-description">Description</Label>
+   229→        <Textarea
+   230→          id="collab-description"
+   231→          rows={4}
+   232→          value={description}
+   233→          onChange={(e) => setDescription(e.target.value)}
+   234→          maxLength={500}
+   235→          placeholder="What are you building, what stage is it at, and what would teammates do?"
+   236→        />
+   237→      </div>
+   238→
+   239→      <div className="space-y-2">
+   240→        <Label htmlFor="collab-category">Category</Label>
+   241→        <Select value={category} onValueChange={setCategory}>
+   242→          <SelectTrigger id="collab-category" className="w-full">
+   243→            <SelectValue placeholder="Pick a category" />
+   244→          </SelectTrigger>
+   245→          <SelectContent>
+   246→            {CATEGORIES.map((option) => (
+   247→              <SelectItem key={option} value={option}>
+   248→                {option}
+   249→              </SelectItem>
+   250→            ))}
+   251→          </SelectContent>
+   252→        </Select>
+   253→      </div>
+   254→
+   255→      <div className="space-y-2">
+   256→        <Label htmlFor="collab-skills">Skills needed</Label>
+   257→        <Input
+   258→          id="collab-skills"
+   259→          value={skills}
+   260→          onChange={(e) => setSkills(e.target.value)}
+   261→          placeholder="e.g. React, TypeScript, Flask"
+   262→        />
+   263→        <p className="text-xs text-muted-foreground">Comma-separated</p>
+   264→        {skillChips.length > 0 ? (
+   265→          <div className="flex flex-wrap gap-1.5">
+   266→            {skillChips.map((skill) => (
+   267→              <Badge
+   268→                key={skill}
+   269→                variant="outline"
+   270→                className="border-blue-200 bg-blue-50 font-medium text-blue-700"
+   271→              >
+   272→                {skill}
+   273→              </Badge>
+   274→            ))}
+   275→          </div>
+   276→        ) : null}
+   277→      </div>
+   278→
+   279→      <div className="space-y-2">
+   280→        <div className="flex items-center justify-between">
+   281→          <Label htmlFor="collab-team-size">Team size</Label>
+   282→          <span className="text-xs font-semibold tabular-nums text-muted-foreground">
+   283→            {teamSize} student{teamSize === 1 ? '' : 's'}
+   284→          </span>
+   285→        </div>
+   286→        <Slider
+   287→          id="collab-team-size"
+   288→          value={[teamSize]}
+   289→          min={TEAM_MIN}
+   290→          max={TEAM_MAX}
+   291→          step={1}
+   292→          onValueChange={(values) => setTeamSize(values[0] ?? teamSize)}
+   293→          aria-label="Team size"
+   294→        />
+   295→      </div>
+   296→
+   297→      {error ? (
+   298→        <p className="text-sm font-medium text-destructive" role="alert">
+   299→          {error}
+   300→        </p>
+   301→      ) : null}
+   302→
+   303→      <DialogFooter>
+   304→        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+   305→          Cancel
+   306→        </Button>
+   307→        <Button
+   308→          type="submit"
+   309→          disabled={createMutation.isPending}
+   310→          className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
+   311→        >
+   312→          {createMutation.isPending ? (
+   313→            <Loader2 className="animate-spin" aria-hidden="true" />
+   314→          ) : (
+   315→            <Plus aria-hidden="true" />
+   316→          )}
+   317→          {createMutation.isPending ? 'Posting…' : 'Post idea'}
+   318→        </Button>
+   319→      </DialogFooter>
+   320→    </form>
+   321→  )
+   322→}
+   323→
+   324→function PostIdeaDialog({
+   325→  open,
+   326→  onOpenChange,
+   327→}: {
+   328→  open: boolean
+   329→  onOpenChange: (open: boolean) => void
+   330→}) {
+   331→  return (
+   332→    <Dialog open={open} onOpenChange={onOpenChange}>
+   333→      <DialogContent className="max-h-[90vh] overflow-y-auto thin-scrollbar sm:max-w-lg">
+   334→        <DialogHeader>
+   335→          <DialogTitle>Post an idea</DialogTitle>
+   336→          <DialogDescription>
+   337→            Share a project you want to build. Skill-matched teammates will be suggested to you
+   338→            right away.
+   339→          </DialogDescription>
+   340→        </DialogHeader>
+   341→        {open ? <PostIdeaForm onOpenChange={onOpenChange} /> : null}
+   342→      </DialogContent>
+   343→    </Dialog>
+   344→  )
+   345→}
+   346→
+   347→/* -------------------------------- Apply flow -------------------------------- */
+   348→
+   349→function ApplyForm({ collab, onOpenChange }: { collab: CollabItem; onOpenChange: (open: boolean) => void }) {
+   350→  const queryClient = useQueryClient()
+   351→  const [message, setMessage] = useState('')
+   352→
+   353→  const applyMutation = useMutation({
+   354→    mutationFn: () =>
+   355→      apiFetch<{ ok: boolean; status: string }>(`/collabs/${collab.id}/apply`, {
+   356→        method: 'POST',
+   357→        body: JSON.stringify({ message: message.trim() }),
+   358→      }),
+   359→    onSuccess: () => {
+   360→      invalidateCollabs(queryClient)
+   361→      onOpenChange(false)
+   362→      toast({
+   363→        title: 'Application sent',
+   364→        description: `The owner of "${collab.title}" will review your note.`,
+   365→      })
+   366→    },
+   367→    onError: (error) => {
+   368→      toast({
+   369→        title: 'Could not apply',
+   370→        description: errText(error),
+   371→        variant: 'destructive',
+   372→      })
+   373→    },
+   374→  })
+   375→
+   376→  return (
+   377→    <form
+   378→      onSubmit={(event) => {
+   379→        event.preventDefault()
+   380→        if (!applyMutation.isPending) applyMutation.mutate()
+   381→      }}
+   382→      className="space-y-4"
+   383→    >
+   384→      <div className="space-y-2">
+   385→        <Label htmlFor="apply-message">Message (optional)</Label>
+   386→        <Textarea
+   387→          id="apply-message"
+   388→          rows={3}
+   389→          value={message}
+   390→          onChange={(e) => setMessage(e.target.value)}
+   391→          maxLength={300}
+   392→          placeholder="e.g. I've built two React apps and would love to own the frontend."
+   393→        />
+   394→      </div>
+   395→      <DialogFooter>
+   396→        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+   397→          Cancel
+   398→        </Button>
+   399→        <Button
+   400→          type="submit"
+   401→          disabled={applyMutation.isPending}
+   402→          className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
+   403→        >
+   404→          {applyMutation.isPending ? (
+   405→            <Loader2 className="animate-spin" aria-hidden="true" />
+   406→          ) : (
+   407→            <UserPlus aria-hidden="true" />
+   408→          )}
+   409→          {applyMutation.isPending ? 'Sending…' : 'Send application'}
+   410→        </Button>
+   411→      </DialogFooter>
+   412→    </form>
+   413→  )
+   414→}
+   415→
+   416→function ApplyDialog({
+   417→  collab,
+   418→  open,
+   419→  onOpenChange,
+   420→}: {
+   421→  collab: CollabItem
+   422→  open: boolean
+   423→  onOpenChange: (open: boolean) => void
+   424→}) {
+   425→  return (
+   426→    <Dialog open={open} onOpenChange={onOpenChange}>
+   427→      <DialogContent className="sm:max-w-md">
+   428→        <DialogHeader>
+   429→          <DialogTitle>Apply to join</DialogTitle>
+   430→          <DialogDescription>
+   431→            Tell the owner of "{collab.title}" why you are a good fit. Skills are matched
+   432→            automatically.
+   433→          </DialogDescription>
+   434→        </DialogHeader>
+   435→        {open ? <ApplyForm collab={collab} onOpenChange={onOpenChange} /> : null}
+   436→      </DialogContent>
+   437→    </Dialog>
+   438→  )
+   439→}
+   440→
+   441→/* ------------------------------ Owner: applications -------------------------- */
+   442→
+   443→function ApplicationRow({
+   444→  application,
+   445→  collab,
+   446→}: {
+   447→  application: CollabApplicationItem
+   448→  collab: CollabItem
+   449→}) {
+   450→  const queryClient = useQueryClient()
+   451→  const openProfile = useAppStore((s) => s.openProfile)
+   452→
+   453→  const acceptMutation = useMutation({
+   454→    mutationFn: () =>
+   455→      apiFetch<{ ok: boolean; joined: string }>(`/collab-applications/${application.id}/accept`, {
+   456→        method: 'POST',
+   457→      }),
+   458→    onSuccess: (data) => {
+   459→      invalidateCollabs(queryClient)
+   460→      toast({
+   461→        title: 'Application accepted',
+   462→        description: `@${data.joined} joined "${collab.title}".`,
+   463→      })
+   464→    },
+   465→    onError: (error) => {
+   466→      toast({
+   467→        title: 'Could not accept application',
+   468→        description: errText(error),
+   469→        variant: 'destructive',
+   470→      })
+   471→    },
+   472→  })
+   473→
+   474→  const rejectMutation = useMutation({
+   475→    mutationFn: () =>
+   476→      apiFetch<{ ok: boolean; rejected: string }>(`/collab-applications/${application.id}/reject`, {
+   477→        method: 'POST',
+   478→      }),
+   479→    onSuccess: (data) => {
+   480→      invalidateCollabs(queryClient)
+   481→      toast({
+   482→        title: 'Application rejected',
+   483→        description: `@${data.rejected} was not added to the team.`,
+   484→      })
+   485→    },
+   486→    onError: (error) => {
+   487→      toast({
+   488→        title: 'Could not reject application',
+   489→        description: errText(error),
+   490→        variant: 'destructive',
+   491→      })
+   492→    },
+   493→  })
+   494→
+   495→  const busy = acceptMutation.isPending || rejectMutation.isPending
+   496→
+   497→  return (
+   498→    <li className="rounded-lg border bg-card p-3">
+   499→      <div className="flex items-center gap-3">
+   500→        <UserAvatar
+   501→          username={application.applicant.username}
+   502→          fullName={application.applicant.full_name}
+   503→          avatarUrl={application.applicant.avatar_url}
+   504→          size="sm"
+   505→          onClick={() => openProfile(application.applicant.username)}
+   506→        />
+   507→        <div className="min-w-0 flex-1">
+   508→          <button
+   509→            type="button"
+   510→            onClick={() => openProfile(application.applicant.username)}
+   511→            className="block truncate text-left text-sm font-semibold hover:underline focus-visible:outline-none focus-visible:underline"
+   512→          >
+   513→            {application.applicant.full_name}
+   514→          </button>
+   515→          <p className="truncate text-xs text-muted-foreground">
+   516→            @{application.applicant.username}
+   517→            {application.applicant.programme ? ` · ${application.applicant.programme}` : ''}
+   518→          </p>
+   519→          <p className="mt-0.5 text-xs text-muted-foreground">
+   520→            Applied {timeAgo(application.created_at)}
+   521→          </p>
+   522→        </div>
+   523→      </div>
+   524→      {application.message ? (
+   525→        <p className="mt-2 border-l-2 border-amber-300 pl-3 text-sm italic text-muted-foreground">
+   526→          &ldquo;{application.message}&rdquo;
+   527→        </p>
+   528→      ) : null}
+   529→      <div className="mt-3 flex items-center gap-2">
+   530→        <Button
+   531→          size="sm"
+   532→          className="flex-1 bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
+   533→          onClick={() => acceptMutation.mutate()}
+   534→          disabled={busy}
+   535→        >
+   536→          <Check aria-hidden="true" />
+   537→          {acceptMutation.isPending ? 'Accepting…' : 'Accept'}
+   538→        </Button>
+   539→        <Button
+   540→          size="sm"
+   541→          variant="outline"
+   542→          className="flex-1 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+   543→          onClick={() => rejectMutation.mutate()}
+   544→          disabled={busy}
+   545→        >
+   546→          <X aria-hidden="true" />
+   547→          {rejectMutation.isPending ? 'Rejecting…' : 'Reject'}
+   548→        </Button>
+   549→      </div>
+   550→    </li>
+   551→  )
+   552→}
+   553→
+   554→function ApplicationsDialog({
+   555→  collab,
+   556→  open,
+   557→  onOpenChange,
+   558→}: {
+   559→  collab: CollabItem
+   560→  open: boolean
+   561→  onOpenChange: (open: boolean) => void
+   562→}) {
+   563→  const applicationsQuery = useQuery({
+   564→    queryKey: ['collab-applications'],
+   565→    queryFn: () => apiFetch<{ applications: CollabApplicationItem[] }>('/collab-applications'),
+   566→    enabled: open,
+   567→  })
+   568→
+   569→  const applications = (applicationsQuery.data?.applications ?? []).filter(
+   570→    (application) => application.collab_id === collab.id,
+   571→  )
+   572→
+   573→  return (
+   574→    <Dialog open={open} onOpenChange={onOpenChange}>
+   575→      <DialogContent className="sm:max-w-lg">
+   576→        <DialogHeader>
+   577→          <DialogTitle>Applications — {collab.title}</DialogTitle>
+   578→          <DialogDescription>
+   579→            Accepting a student adds them to the team immediately.
+   580→          </DialogDescription>
+   581→        </DialogHeader>
+   582→        {applicationsQuery.isLoading ? (
+   583→          <div className="space-y-2.5">
+   584→            {[0, 1].map((i) => (
+   585→              <div key={i} className="rounded-lg border p-3">
+   586→                <div className="flex items-center gap-3">
+   587→                  <Skeleton className="size-8 rounded-full" />
+   588→                  <div className="flex-1 space-y-2">
+   589→                    <Skeleton className="h-4 w-36" />
+   590→                    <Skeleton className="h-3 w-24" />
+   591→                  </div>
+   592→                </div>
+   593→                <Skeleton className="mt-3 h-8 w-full rounded-md" />
+   594→              </div>
+   595→            ))}
+   596→          </div>
+   597→        ) : applications.length === 0 ? (
+   598→          <EmptyState
+   599→            icon={Inbox}
+   600→            title="No pending applications"
+   601→            description="When students apply to join this team, their notes will land here."
+   602→          />
+   603→        ) : (
+   604→          <ul className="max-h-[60vh] space-y-2.5 overflow-y-auto thin-scrollbar pr-1">
+   605→            {applications.map((application) => (
+   606→              <ApplicationRow key={application.id} application={application} collab={collab} />
+   607→            ))}
+   608→          </ul>
+   609→        )}
+   610→      </DialogContent>
+   611→    </Dialog>
+   612→  )
+   613→}
+   614→
+   615→/* ---------------------------- Owner: suggestions ---------------------------- */
+   616→
+   617→const RELATIONSHIP_LABEL: Record<string, string> = {
+   618→  connected: 'Connected',
+   619→  pending_out: 'Request pending',
+   620→  pending_in: 'Their request',
+   621→  none: 'Not connected',
+   622→}
+   623→
+   624→function CandidateRow({ candidate }: { candidate: CollabCandidate }) {
+   625→  const openProfile = useAppStore((s) => s.openProfile)
+   626→  const coverage = Math.round(candidate.coverage * 100)
+   627→
+   628→  return (
+   629→    <li className="rounded-lg border bg-card p-3">
+   630→      <div className="flex items-start gap-3">
+   631→        <UserAvatar
+   632→          username={candidate.username}
+   633→          fullName={candidate.full_name}
+   634→          avatarUrl={candidate.avatar_url}
+   635→          size="sm"
+   636→          onClick={() => openProfile(candidate.username)}
+   637→        />
+   638→        <div className="min-w-0 flex-1">
+   639→          <div className="flex flex-wrap items-center gap-1.5">
+   640→            <button
+   641→              type="button"
+   642→              onClick={() => openProfile(candidate.username)}
+   643→              className="truncate text-left text-sm font-semibold hover:underline focus-visible:outline-none focus-visible:underline"
+   644→            >
+   645→              {candidate.full_name}
+   646→            </button>
+   647→            {candidate.relationship !== 'self' && candidate.relationship !== 'connected' ? (
+   648→              <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
+   649→                {RELATIONSHIP_LABEL[candidate.relationship] ?? 'Not connected'}
+   650→              </Badge>
+   651→            ) : candidate.relationship === 'connected' ? (
+   652→              <Badge
+   653→                variant="outline"
+   654→                className="border-emerald-200 bg-emerald-50 font-medium text-emerald-700"
+   655→              >
+   656→                <CheckCircle2 aria-hidden="true" />
+   657→                Connected
+   658→              </Badge>
+   659→            ) : null}
+   660→          </div>
+   661→          <p className="truncate text-xs text-muted-foreground">
+   662→            @{candidate.username}
+   663→            {candidate.programme ? ` · ${candidate.programme}` : ''}
+   664→            {candidate.year ? ` · ${candidate.year}` : ''}
+   665→          </p>
+   666→
+   667→          <div className="mt-2">
+   668→            <div className="flex items-center justify-between text-xs text-muted-foreground">
+   669→              <span>Skill coverage</span>
+   670→              <span className="font-semibold tabular-nums text-foreground">{coverage}%</span>
+   671→            </div>
+   672→            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+   673→              <div
+   674→                className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-600"
+   675→                style={{ width: `${coverage}%` }}
+   676→              />
+   677→            </div>
+   678→          </div>
+   679→
+   680→          {candidate.shared_skills.length > 0 ? (
+   681→            <div className="mt-2 flex flex-wrap gap-1.5">
+   682→              {candidate.shared_skills.map((skill) => (
+   683→                <Badge
+   684→                  key={skill}
+   685→                  variant="outline"
+   686→                  className="border-blue-200 bg-blue-50 font-medium text-blue-700"
+   687→                >
+   688→                  {skill}
+   689→                </Badge>
+   690→              ))}
+   691→            </div>
+   692→          ) : (
+   693→            <p className="mt-2 text-xs text-muted-foreground">No overlapping skills yet.</p>
+   694→          )}
+   695→
+   696→          <Button
+   697→            variant="ghost"
+   698→            size="sm"
+   699→            className="mt-2 h-7 gap-1.5 px-2 text-xs text-muted-foreground"
+   700→            onClick={() => openProfile(candidate.username)}
+   701→          >
+   702→            View profile
+   703→          </Button>
+   704→        </div>
+   705→      </div>
+   706→    </li>
+   707→  )
+   708→}
+   709→
+   710→function CandidatesDialog({
+   711→  collab,
+   712→  open,
+   713→  onOpenChange,
+   714→}: {
+   715→  collab: CollabItem
+   716→  open: boolean
+   717→  onOpenChange: (open: boolean) => void
+   718→}) {
+   719→  const candidatesQuery = useQuery({
+   720→    queryKey: ['collab-candidates', collab.id],
+   721→    queryFn: () => apiFetch<{ candidates: CollabCandidate[] }>(`/collabs/${collab.id}/candidates`),
+   722→    enabled: open,
+   723→  })
+   724→
+   725→  const candidates = candidatesQuery.data?.candidates ?? []
+   726→
+   727→  return (
+   728→    <Dialog open={open} onOpenChange={onOpenChange}>
+   729→      <DialogContent className="max-h-[85vh] overflow-y-auto thin-scrollbar sm:max-w-lg">
+   730→        <DialogHeader>
+   731→          <DialogTitle>Suggested teammates — {collab.title}</DialogTitle>
+   732→          <DialogDescription>
+   733→            Ranked by how many of the skills this project needs each student already covers.
+   734→          </DialogDescription>
+   735→        </DialogHeader>
+   736→        {candidatesQuery.isLoading ? (
+   737→          <div className="space-y-2.5">
+   738→            {[0, 1].map((i) => (
+   739→              <div key={i} className="rounded-lg border p-3">
+   740→                <div className="flex items-center gap-3">
+   741→                  <Skeleton className="size-8 rounded-full" />
+   742→                  <div className="flex-1 space-y-2">
+   743→                    <Skeleton className="h-4 w-36" />
+   744→                    <Skeleton className="h-3 w-32" />
+   745→                  </div>
+   746→                </div>
+   747→                <Skeleton className="mt-3 h-1.5 w-full rounded-full" />
+   748→              </div>
+   749→            ))}
+   750→          </div>
+   751→        ) : candidates.length === 0 ? (
+   752→          <EmptyState
+   753→            icon={Users}
+   754→            title="No candidates yet"
+   755→            description="Students whose skills overlap with this project will be suggested here."
+   756→          />
+   757→        ) : (
+   758→          <ul className="max-h-[55vh] space-y-2.5 overflow-y-auto thin-scrollbar pr-1">
+   759→            {candidates.map((candidate) => (
+   760→              <CandidateRow key={candidate.username} candidate={candidate} />
+   761→            ))}
+   762→          </ul>
+   763→        )}
+   764→      </DialogContent>
+   765→    </Dialog>
+   766→  )
+   767→}
+   768→
+   769→/* --------------------------------- Card ------------------------------------- */
+   770→
+   771→function CollabCard({ collab }: { collab: CollabItem }) {
+   772→  const openProfile = useAppStore((s) => s.openProfile)
+   773→  const queryClient = useQueryClient()
+   774→
+   775→  const [applyOpen, setApplyOpen] = useState(false)
+   776→  const [applicationsOpen, setApplicationsOpen] = useState(false)
+   777→  const [candidatesOpen, setCandidatesOpen] = useState(false)
+   778→  const [deleteOpen, setDeleteOpen] = useState(false)
+   779→
+   780→  const closed = collab.status === 'closed'
+   781→
+   782→  const statusMutation = useMutation({
+   783→    mutationFn: (nextClosed: boolean) =>
+   784→      apiFetch<{ ok: boolean; status: 'open' | 'closed' }>(`/collabs/${collab.id}/status`, {
+   785→        method: 'POST',
+   786→        body: JSON.stringify({ closed: nextClosed }),
+   787→      }),
+   788→    onSuccess: (data) => {
+   789→      invalidateCollabs(queryClient)
+   790→      toast({
+   791→        title: data.status === 'closed' ? 'Recruiting closed' : 'Recruiting reopened',
+   792→        description:
+   793→          data.status === 'closed'
+   794→            ? `"${collab.title}" no longer accepts applications.`
+   795→            : `"${collab.title}" accepts applications again.`,
+   796→      })
+   797→    },
+   798→    onError: (error) => {
+   799→      toast({
+   800→        title: 'Could not update status',
+   801→        description: errText(error),
+   802→        variant: 'destructive',
+   803→      })
+   804→    },
+   805→  })
+   806→
+   807→  const deleteMutation = useMutation({
+   808→    mutationFn: () => apiFetch<{ ok: boolean; deleted: number }>(`/collabs/${collab.id}`, {
+   809→      method: 'DELETE',
+   810→    }),
+   811→    onSuccess: () => {
+   812→      invalidateCollabs(queryClient)
+   813→      setDeleteOpen(false)
+   814→      toast({
+   815→        title: 'Collab deleted',
+   816→        description: `"${collab.title}" was removed from the hub.`,
+   817→      })
+   818→    },
+   819→    onError: (error) => {
+   820→      toast({
+   821→        title: 'Could not delete collab',
+   822→        description: errText(error),
+   823→        variant: 'destructive',
+   824→      })
+   825→    },
+   826→  })
+   827→
+   828→  const visibleMembers = collab.members.slice(0, 4)
+   829→  const overflow = Math.max(0, collab.member_count - visibleMembers.length)
+   830→
+   831→  return (
+   832→    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.15 }} className="h-full">
+   833→      <Card className="h-full rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md">
+   834→        <CardContent className="flex h-full flex-col p-4">
+   835→          {/* Title + status */}
+   836→          <div className="flex items-start justify-between gap-2">
+   837→            <h3 className="min-w-0 text-base font-semibold leading-snug tracking-tight text-foreground">
+   838→              {collab.title}
+   839→            </h3>
+   840→            {closed ? (
+   841→              <Badge variant="outline" className="shrink-0 border-border bg-muted text-muted-foreground">
+   842→                <Lock aria-hidden="true" />
+   843→                Closed
+   844→              </Badge>
+   845→            ) : (
+   846→              <Badge
+   847→                variant="outline"
+   848→                className="shrink-0 border-teal-200 bg-teal-50 font-medium text-teal-700"
+   849→              >
+   850→                <span className="size-1.5 rounded-full bg-teal-500" aria-hidden="true" />
+   851→                Open
+   852→              </Badge>
+   853→            )}
+   854→          </div>
+   855→
+   856→          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+   857→            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+   858→              {collab.category}
+   859→            </Badge>
+   860→            <span className="text-xs text-muted-foreground">
+   861→              Posted {timeAgo(collab.created_at)}
+   862→            </span>
+   863→          </div>
+   864→
+   865→          {/* Owner */}
+   866→          <div className="mt-3 flex items-center gap-2">
+   867→            <UserAvatar
+   868→              username={collab.owner.username}
+   869→              fullName={collab.owner.full_name}
+   870→              avatarUrl={collab.owner.avatar_url}
+   871→              size="sm"
+   872→              onClick={() => openProfile(collab.owner.username)}
+   873→            />
+   874→            <button
+   875→              type="button"
+   876→              onClick={() => openProfile(collab.owner.username)}
+   877→              className="truncate text-left text-sm font-medium hover:underline focus-visible:outline-none focus-visible:underline"
+   878→            >
+   879→              {collab.owner.full_name}
+   880→            </button>
+   881→            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+   882→              owner
+   883→            </span>
+   884→          </div>
+   885→
+   886→          {/* Description */}
+   887→          <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+   888→            {collab.description}
+   889→          </p>
+   890→
+   891→          {/* Skills needed */}
+   892→          {collab.skills_needed.length > 0 ? (
+   893→            <div className="mt-3 flex flex-wrap gap-1.5">
+   894→              {collab.skills_needed.slice(0, 5).map((skill) => (
+   895→                <Badge
+   896→                  key={skill}
+   897→                  variant="outline"
+   898→                  className="border-blue-200 bg-blue-50 font-medium text-blue-700"
+   899→                >
+   900→                  {skill}
+   901→                </Badge>
+   902→              ))}
+   903→              {collab.skills_needed.length > 5 ? (
+   904→                <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+   905→                  +{collab.skills_needed.length - 5}
+   906→                </Badge>
+   907→              ) : null}
+   908→            </div>
+   909→          ) : null}
+   910→
+   911→          {/* Team */}
+   912→          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/50 px-3 py-2">
+   913→            <div className="flex -space-x-2">
+   914→              {visibleMembers.map((member) => (
+   915→                <UserAvatar
+   916→                  key={member.username}
+   917→                  username={member.username}
+   918→                  fullName={member.full_name}
+   919→                  avatarUrl={member.avatar_url}
+   920→                  size="sm"
+   921→                  className="ring-2 ring-white"
+   922→                  onClick={() => openProfile(member.username)}
+   923→                  label={`Open ${member.full_name}'s profile`}
+   924→                />
+   925→              ))}
+   926→              {overflow > 0 ? (
+   927→                <span
+   928→                  className="flex size-8 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground ring-2 ring-white"
+   929→                  aria-label={`${overflow} more member${overflow === 1 ? '' : 's'}`}
+   930→                >
+   931→                  +{overflow}
+   932→                </span>
+   933→              ) : null}
+   934→            </div>
+   935→            <p className="text-xs font-medium text-muted-foreground">
+   936→              {collab.member_count}/{collab.team_size} members ·{' '}
+   937→              {collab.open_spots > 0
+   938→                ? `${collab.open_spots} ${collab.open_spots === 1 ? 'spot' : 'spots'} left`
+   939→                : 'Team full'}
+   940→            </p>
+   941→          </div>
+   942→
+   943→          {/* Actions */}
+   944→          <div className="mt-auto pt-4">
+   945→            {collab.my_status === 'owner' ? (
+   946→              <div className="flex flex-wrap items-center gap-2">
+   947→                <Button
+   948→                  variant="outline"
+   949→                  size="sm"
+   950→                  onClick={() => setApplicationsOpen(true)}
+   951→                >
+   952→                  <Inbox aria-hidden="true" />
+   953→                  Applications ({collab.pending_count})
+   954→                </Button>
+   955→                <Button variant="outline" size="sm" onClick={() => setCandidatesOpen(true)}>
+   956→                  <Sparkles aria-hidden="true" />
+   957→                  Suggested teammates
+   958→                </Button>
+   959→                <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+   960→                  <DropdownMenu>
+   961→                    <DropdownMenuTrigger asChild>
+   962→                      <Button
+   963→                        variant="ghost"
+   964→                        size="icon"
+   965→                        aria-label={`Manage ${collab.title}`}
+   966→                        className="size-8"
+   967→                      >
+   968→                        <MoreHorizontal className="size-4" aria-hidden="true" />
+   969→                      </Button>
+   970→                    </DropdownMenuTrigger>
+   971→                    <DropdownMenuContent align="end">
+   972→                      <DropdownMenuItem
+   973→                        onSelect={() => statusMutation.mutate(!closed)}
+   974→                        disabled={statusMutation.isPending}
+   975→                      >
+   976→                        {closed ? (
+   977→                          <LockOpen aria-hidden="true" />
+   978→                        ) : (
+   979→                          <Lock aria-hidden="true" />
+   980→                        )}
+   981→                        {closed ? 'Reopen recruiting' : 'Close recruiting'}
+   982→                      </DropdownMenuItem>
+   983→                      <DropdownMenuItem
+   984→                        onSelect={() => setDeleteOpen(true)}
+   985→                        className="text-destructive focus:text-destructive"
+   986→                      >
+   987→                        <Trash2 aria-hidden="true" />
+   988→                        Delete
+   989→                      </DropdownMenuItem>
+   990→                    </DropdownMenuContent>
+   991→                  </DropdownMenu>
+   992→                  <AlertDialogContent>
+   993→                    <AlertDialogHeader>
+   994→                      <AlertDialogTitle>Delete this collab?</AlertDialogTitle>
+   995→                      <AlertDialogDescription>
+   996→                        &ldquo;{collab.title}&rdquo; and its pending applications will be
+   997→                        permanently removed. Current members will lose access.
+   998→                      </AlertDialogDescription>
+   999→                    </AlertDialogHeader>
+  1000→                    <AlertDialogFooter>
+  1001→                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1002→                      <AlertDialogAction
+  1003→                        onClick={() => deleteMutation.mutate()}
+  1004→                        className="bg-destructive text-white hover:bg-destructive/90"
+  1005→                      >
+  1006→                        {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+  1007→                      </AlertDialogAction>
+  1008→                    </AlertDialogFooter>
+  1009→                  </AlertDialogContent>
+  1010→                </AlertDialog>
+  1011→              </div>
+  1012→            ) : collab.my_status === 'member' ? (
+  1013→              <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700">
+  1014→                <CheckCircle2 className="size-3.5" aria-hidden="true" />
+  1015→                You&rsquo;re on the team
+  1016→              </span>
+  1017→            ) : collab.my_status === 'applied' ? (
+  1018→              <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700">
+  1019→                <Clock className="size-3.5" aria-hidden="true" />
+  1020→                Application pending
+  1021→              </span>
+  1022→            ) : closed ? (
+  1023→              <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+  1024→                <Lock className="size-3.5" aria-hidden="true" />
+  1025→                Recruiting closed
+  1026→              </span>
+  1027→            ) : (
+  1028→              <Button
+  1029→                size="sm"
+  1030→                className="w-full bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
+  1031→                onClick={() => setApplyOpen(true)}
+  1032→              >
+  1033→                <UserPlus aria-hidden="true" />
+  1034→                Apply to join
+  1035→              </Button>
+  1036→            )}
+  1037→          </div>
+  1038→        </CardContent>
+  1039→      </Card>
+  1040→
+  1041→      <ApplyDialog collab={collab} open={applyOpen} onOpenChange={setApplyOpen} />
+  1042→      <ApplicationsDialog collab={collab} open={applicationsOpen} onOpenChange={setApplicationsOpen} />
+  1043→      <CandidatesDialog collab={collab} open={candidatesOpen} onOpenChange={setCandidatesOpen} />
+  1044→    </motion.div>
+  1045→  )
+  1046→}
+  1047→
+  1048→/* --------------------------------- View ------------------------------------- */
+  1049→
+  1050→function CollabGrid({ collabs, empty }: { collabs: CollabItem[]; empty: React.ReactNode }) {
+  1051→  if (collabs.length === 0) return <>{empty}</>
+  1052→  return (
+  1053→    <div className="grid gap-4 md:grid-cols-2">
+  1054→      {collabs.map((collab) => (
+  1055→        <CollabCard key={collab.id} collab={collab} />
+  1056→      ))}
+  1057→    </div>
+  1058→  )
+  1059→}
+  1060→
+  1061→function CountPill({ value }: { value: number }) {
+  1062→  return (
+  1063→    <span className="ml-1.5 rounded-full bg-muted-foreground/20 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums">
+  1064→      {value}
+  1065→    </span>
+  1066→  )
+  1067→}
+  1068→
+  1069→export function CollabHubView() {
+  1070→  const [filter, setFilter] = useState<CollabFilter>('all')
+  1071→  const [postOpen, setPostOpen] = useState(false)
+  1072→
+  1073→  const collabsQuery = useQuery({
+  1074→    queryKey: ['collabs'],
+  1075→    queryFn: () => apiFetch<{ collabs: CollabItem[] }>('/collabs'),
+  1076→  })
+  1077→
+  1078→  const collabs = collabsQuery.data?.collabs ?? []
+  1079→  const openCollabs = collabs.filter((c) => c.status === 'open')
+  1080→  const mineCollabs = collabs.filter((c) => c.is_owner || c.my_status === 'member')
+  1081→
+  1082→  const postIdeaButton = (
+  1083→    <Button
+  1084→      onClick={() => setPostOpen(true)}
+  1085→      className="bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm hover:from-amber-600 hover:to-orange-700"
+  1086→    >
+  1087→      <Plus aria-hidden="true" />
+  1088→      Post an idea
+  1089→    </Button>
+  1090→  )
+  1091→
+  1092→  return (
+  1093→    <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+  1094→      <motion.div
+  1095→        initial={{ opacity: 0, y: 8 }}
+  1096→        animate={{ opacity: 1, y: 0 }}
+  1097→        transition={{ duration: 0.2 }}
+  1098→      >
+  1099→        <SectionHeader
+  1100→          title="Collaboration Hub"
+  1101→          subtitle="Post project ideas, build teams and get skill-matched teammate suggestions from across campus."
+  1102→          action={postIdeaButton}
+  1103→        />
+  1104→
+  1105→        {collabsQuery.isLoading ? (
+  1106→          <div className="grid gap-4 md:grid-cols-2">
+  1107→            {[0, 1, 2, 3].map((i) => (
+  1108→              <CollabCardSkeleton key={i} />
+  1109→            ))}
+  1110→          </div>
+  1111→        ) : collabsQuery.isError ? (
+  1112→          <EmptyState
+  1113→            icon={Inbox}
+  1114→            title="Could not load the hub"
+  1115→            description="The collaboration service could not be reached. Please refresh and try again."
+  1116→          />
+  1117→        ) : (
+  1118→          <Tabs value={filter} onValueChange={(value) => setFilter(value as CollabFilter)}>
+  1119→            <TabsList className="mb-4">
+  1120→              <TabsTrigger value="all">
+  1121→                All
+  1122→                <CountPill value={collabs.length} />
+  1123→              </TabsTrigger>
+  1124→              <TabsTrigger value="open">
+  1125→                Open
+  1126→                <CountPill value={openCollabs.length} />
+  1127→              </TabsTrigger>
+  1128→              <TabsTrigger value="mine">
+  1129→                Mine
+  1130→                <CountPill value={mineCollabs.length} />
+  1131→              </TabsTrigger>
+  1132→            </TabsList>
+  1133→
+  1134→            <TabsContent value="all" className="mt-0">
+  1135→              <CollabGrid
+  1136→                collabs={collabs}
+  1137→                empty={
+  1138→                  <EmptyState
+  1139→                    icon={Lightbulb}
+  1140→                    title="Be the first to post an idea"
+  1141→                    description="No collabs have been posted yet. Share a project you want to build and let skill-matched teammates find you."
+  1142→                    action={postIdeaButton}
+  1143→                  />
+  1144→                }
+  1145→              />
+  1146→            </TabsContent>
+  1147→            <TabsContent value="open" className="mt-0">
+  1148→              <CollabGrid
+  1149→                collabs={openCollabs}
+  1150→                empty={
+  1151→                  <EmptyState
+  1152→                    icon={Lightbulb}
+  1153→                    title="No open collabs right now"
+  1154→                    description="Every posted team is either full or closed. Post your own idea to start recruiting."
+  1155→                    action={postIdeaButton}
+  1156→                  />
+  1157→                }
+  1158→              />
+  1159→            </TabsContent>
+  1160→            <TabsContent value="mine" className="mt-0">
+  1161→              <CollabGrid
+  1162→                collabs={mineCollabs}
+  1163→                empty={
+  1164→                  <EmptyState
+  1165→                    icon={Users}
+  1166→                    title="Nothing of yours here yet"
+  1167→                    description="Collabs you own or belong to will show up in this tab."
+  1168→                    action={postIdeaButton}
+  1169→                  />
+  1170→                }
+  1171→              />
+  1172→            </TabsContent>
+  1173→          </Tabs>
+  1174→        )}
+  1175→
+  1176→        <PostIdeaDialog open={postOpen} onOpenChange={setPostOpen} />
+  1177→      </motion.div>
+  1178→    </div>
+  1179→  )
+  1180→}
+  1181→

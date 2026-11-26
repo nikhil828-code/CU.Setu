@@ -3,6 +3,8 @@
 from .user import User, hash_password, verify_password
 from .connection import ConnectionRequest, PENDING
 from .post import Post, Comment, Notification
+from .collab import Collab, CollabMember, CollabApplication
+from .project import ShowcaseProject, ProjectContributor
 
 __all__ = [
     "User",
@@ -13,4 +15,9 @@ __all__ = [
     "Post",
     "Comment",
     "Notification",
+    "Collab",
+    "CollabMember",
+    "CollabApplication",
+    "ShowcaseProject",
+    "ProjectContributor",
 ]

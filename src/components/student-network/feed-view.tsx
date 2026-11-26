@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { Compass, Network, Rss, Users } from 'lucide-react'
+import { Activity, Bell, Briefcase, Compass, FolderKanban, Rss, TrendingUp, Users } from 'lucide-react'
 
 import { EmptyState } from '@/components/student-network/empty-state'
 import { PostCard, PostCardSkeleton } from '@/components/student-network/post-card'
@@ -10,14 +10,19 @@ import { PostComposer } from '@/components/student-network/post-composer'
 import { SectionHeader } from '@/components/student-network/section-header'
 import { ConnectButton } from '@/components/student-network/connect-button'
 import { UserAvatar } from '@/components/student-network/user-avatar'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { apiFetch } from '@/lib/api'
 import type {
+  CollabItem,
   ConnectionItem,
+  NotificationItem,
   Post,
+  ProjectItem,
   Recommendation,
+  SkillAnalyticsResponse,
   StatsResponse,
 } from '@/lib/types'
 import { useAppStore } from '@/store/app-store'
@@ -70,8 +75,35 @@ export function FeedView() {
     queryFn: () => apiFetch<{ connections: ConnectionItem[] }>('/connections'),
   })
 
+  const projectsQuery = useQuery({
+    queryKey: ['projects', 'rail'],
+    queryFn: () => apiFetch<{ projects: ProjectItem[] }>('/projects'),
+  })
+
+  const collabsQuery = useQuery({
+    queryKey: ['collabs', 'rail'],
+    queryFn: () => apiFetch<{ collabs: CollabItem[] }>('/collabs'),
+  })
+
+  const analyticsQuery = useQuery({
+    queryKey: ['analytics', 'rail'],
+    queryFn: () => apiFetch<SkillAnalyticsResponse>('/analytics/skills'),
+  })
+
+  const activityQuery = useQuery({
+    queryKey: ['notifications', 'rail'],
+    queryFn: () =>
+      apiFetch<{ notifications: NotificationItem[]; unread: number }>('/notifications'),
+  })
+
   const posts = feedQuery.data?.posts ?? []
   const recommendations = railQuery.data?.recommendations ?? []
+  const featuredProjects = (projectsQuery.data?.projects ?? []).filter((p) => p.featured).slice(0, 3)
+  const openCollabs = (collabsQuery.data?.collabs ?? [])
+    .filter((c) => c.status === 'open' && c.open_spots > 0)
+    .slice(0, 3)
+  const topSkills = (analyticsQuery.data?.top ?? []).slice(0, 5)
+  const recentActivity = (activityQuery.data?.notifications ?? []).slice(0, 4)
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
@@ -177,7 +209,176 @@ export function FeedView() {
           <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <Network className="size-4 text-orange-600" aria-hidden="true" />
+                <FolderKanban className="size-4 text-orange-600" aria-hidden="true" />
+                Featured projects
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              {projectsQuery.isLoading ? (
+                <div className="space-y-2">
+                  {[0, 1].map((i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
+                  ))}
+                </div>
+              ) : featuredProjects.length > 0 ? (
+                featuredProjects.map((project) => (
+                  <button
+                    key={project.id}
+                    type="button"
+                    onClick={() => goto('showcase')}
+                    className="flex w-full items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-muted/60"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{project.title}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        by @{project.owner.username} · {project.tech_stack.slice(0, 3).join(', ')}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+                      Featured
+                    </Badge>
+                  </button>
+                ))
+              ) : (
+                <p className="px-1.5 py-2 text-xs text-muted-foreground">
+                  No featured projects yet — publish one from the Showcase.
+                </p>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-1 w-full text-muted-foreground hover:text-foreground"
+                onClick={() => goto('showcase')}
+              >
+                Open Project Showcase
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <Briefcase className="size-4 text-orange-600" aria-hidden="true" />
+                Collaboration opportunities
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              {collabsQuery.isLoading ? (
+                <div className="space-y-2">
+                  {[0, 1].map((i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
+                  ))}
+                </div>
+              ) : openCollabs.length > 0 ? (
+                openCollabs.map((collab) => (
+                  <button
+                    key={collab.id}
+                    type="button"
+                    onClick={() => goto('collab')}
+                    className="flex w-full items-center gap-3 rounded-lg p-1.5 text-left transition-colors hover:bg-muted/60"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{collab.title}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        needs {collab.skills_needed.slice(0, 3).join(', ') || 'motivated students'}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="border-cyan-200 bg-cyan-50 text-cyan-700">
+                      {collab.open_spots} spot{collab.open_spots === 1 ? '' : 's'}
+                    </Badge>
+                  </button>
+                ))
+              ) : (
+                <p className="px-1.5 py-2 text-xs text-muted-foreground">
+                  No open teams right now — post an idea in the Hub.
+                </p>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-1 w-full text-muted-foreground hover:text-foreground"
+                onClick={() => goto('collab')}
+              >
+                Open Collaboration Hub
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <TrendingUp className="size-4 text-orange-600" aria-hidden="true" />
+                Trending skills on campus
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {analyticsQuery.isLoading ? (
+                <div className="space-y-2">
+                  {[0, 1, 2].map((i) => (
+                    <Skeleton key={i} className="h-4 w-full" />
+                  ))}
+                </div>
+              ) : topSkills.length > 0 ? (
+                topSkills.map((skill, index) => (
+                  <button
+                    key={skill.skill}
+                    type="button"
+                    onClick={() => goto('analytics')}
+                    className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-muted/60"
+                  >
+                    <span className="w-4 text-right text-xs tabular-nums text-muted-foreground">
+                      {index + 1}.
+                    </span>
+                    <span className="flex-1 truncate text-sm">{skill.skill}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {skill.count}
+                    </span>
+                    <span
+                      className="h-1.5 rounded-full bg-gradient-to-r from-amber-400 to-orange-600"
+                      style={{ width: `${Math.min(100, (skill.count / (topSkills[0]?.count || 1)) * 56)}px` }}
+                      aria-hidden="true"
+                    />
+                  </button>
+                ))
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <Bell className="size-4 text-orange-600" aria-hidden="true" />
+                Recent activity
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2.5">
+              {activityQuery.isLoading ? (
+                <div className="space-y-2">
+                  {[0, 1, 2].map((i) => (
+                    <Skeleton key={i} className="h-4 w-full" />
+                  ))}
+                </div>
+              ) : recentActivity.length > 0 ? (
+                recentActivity.map((note) => (
+                  <button
+                    key={note.id}
+                    type="button"
+                    onClick={() => goto('notifications')}
+                    className="block w-full truncate rounded px-1 py-0.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                  >
+                    {note.message}
+                  </button>
+                ))
+              ) : (
+                <p className="px-1 text-xs text-muted-foreground">Nothing new lately.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <Activity className="size-4 text-orange-600" aria-hidden="true" />
                 Live platform stats
               </CardTitle>
             </CardHeader>
